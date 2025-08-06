@@ -12,7 +12,7 @@ An MCP server that connects AI assistants to your Vectra AI security platform, e
 # What can you do with Vectra AI MCP?
 
 * Investigate threats in natural language
-* Take response actions in Vectra platform frm your AI agent
+* Take response actions in Vectra directly from your AI agent
 * Correlate and analyze security data using prompts
 * Dynamically build advanced visulizations for analysis
 * Generate investigation reports from natural language
