@@ -1,0 +1,12 @@
+[project]
+name = "vectra-mcp-v-0-1"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.12.1",
+    "tenacity>=9.1.2",
+    "uvicorn>=0.24.0",
+]
