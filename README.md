@@ -12,8 +12,8 @@ An MCP server that connects AI assistants to your Vectra AI security platform, e
 # What can you do with Vectra AI MCP?
 
 * Investigate threats in natural language
-* Take response actions in Vectra platform
-* Correlate and analyze security data
+* Take response actions in Vectra platform frm your AI agent
+* Correlate and analyze security data using prompts
 * Dynamically build advanced visulizations for analysis
 * Generate investigation reports from natural language
 
@@ -252,25 +252,6 @@ docker run -d \
   vectra-mcp-server
 ```
 
-### Useful Docker Commands
-
-```bash
-# View logs
-docker logs -f vectra-mcp-server-http  # or -sse or -stdio
-
-# Stop the server
-docker stop vectra-mcp-server-http
-
-# Remove the container
-docker rm vectra-mcp-server-http
-
-# Restart the server
-docker restart vectra-mcp-server-http
-
-# Check container status
-docker ps -a | grep vectra-mcp-server
-```
-
 ## Docker Environment Variables
 
 The Docker container supports all the same environment variables as the local setup, plus additional MCP server configuration:
@@ -309,18 +290,3 @@ For HTTP-based MCP clients connecting to the Dockerized server, use the appropri
 The Docker container includes health checks that will verify the server is running properly:
 - For `stdio` transport: Always reports healthy (no HTTP endpoint to check)
 - For HTTP transports: Checks HTTP endpoint availability
-
-## Docker Logs
-
-```bash
-# View logs for specific transport
-docker logs -f vectra-mcp-server-http     # Streamable HTTP
-docker logs -f vectra-mcp-server-sse      # SSE
-docker logs -f vectra-mcp-server-stdio    # Stdio
-
-# Follow logs in real-time
-docker logs -f --tail 100 vectra-mcp-server-http
-```
-
-
-
