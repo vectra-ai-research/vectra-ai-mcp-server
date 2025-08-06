@@ -290,3 +290,5 @@ For HTTP-based MCP clients connecting to the Dockerized server, use the appropri
 The Docker container includes health checks that will verify the server is running properly:
 - For `stdio` transport: Always reports healthy (no HTTP endpoint to check)
 - For HTTP transports: Checks HTTP endpoint availability
+
+> **Note**: MCP (Model Context Protocol) is an emerging and rapidly evolving technology. Exercise caution when using this server and follow security best practices, including proper credential management and network security measures.
