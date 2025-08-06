@@ -92,7 +92,7 @@ class VectraConfig(BaseSettings):
             return self.oauth_token_url_override
         
         # Try common OAuth endpoints for Vectra tenants
-        return f"{self.base_url}/api/v3.4/oauth2/token"
+        return f"{self.base_url}/oauth2/token"
     
     model_config = {
         "env_file": ".env",
