@@ -184,15 +184,104 @@ For other MCP clients, refer to their respective documentation. The general patt
 
 # Setup - Docker Deployment
 
-For production deployments or easier setup, you can run the Vectra AI MCP Server using Docker.
+For production deployments or easier setup, you can run the Vectra AI MCP Server using Docker. We provide two options:
 
-## Prerequisites
+## Option 1: Using Pre-built Images (Recommended)
+
+The easiest way to get started is using our pre-built Docker images from GitHub Container Registry.
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine
+
+### Quick Start Steps
+
+1. **Configure environment variables:**
+```bash
+# Copy the example environment file
+cp .env.example .env
+```
+Then edit the `.env` file with your actual Vectra AI Platform credentials.
+
+2. **Run with pre-built image:**
+
+#### Streamable HTTP Transport (Recommended for Production)
+```bash
+docker run -d \
+  --name vectra-mcp-server-http \
+  --env-file .env \
+  -e VECTRA_MCP_TRANSPORT=streamable-http \
+  -e VECTRA_MCP_HOST=0.0.0.0 \
+  -e VECTRA_MCP_PORT=8000 \
+  -p 8000:8000 \
+  --restart unless-stopped \
+  ghcr.io/openrec0n/vectra-ai-mcp-server:latest
+```
+
+#### SSE Transport (Server-Sent Events)
+```bash
+docker run -d \
+  --name vectra-mcp-server-sse \
+  --env-file .env \
+  -e VECTRA_MCP_TRANSPORT=sse \
+  -e VECTRA_MCP_HOST=0.0.0.0 \
+  -e VECTRA_MCP_PORT=8000 \
+  -p 8000:8000 \
+  --restart unless-stopped \
+  ghcr.io/openrec0n/vectra-ai-mcp-server:latest
+```
+
+#### Stdio Transport (For Local MCP Clients)
+```bash
+docker run -d \
+  --name vectra-mcp-server-stdio \
+  --env-file .env \
+  -e VECTRA_MCP_TRANSPORT=stdio \
+  --restart unless-stopped \
+  ghcr.io/openrec0n/vectra-ai-mcp-server:latest
+```
+
+3. **Or use Docker Compose (Alternative):**
+
+Create a `docker-compose.yml` file:
+```yaml
+version: '3.8'
+services:
+  vectra-mcp-server:
+    image: ghcr.io/openrec0n/vectra-ai-mcp-server:latest
+    container_name: vectra-mcp-server
+    env_file: .env
+    environment:
+      - VECTRA_MCP_TRANSPORT=streamable-http
+      - VECTRA_MCP_HOST=0.0.0.0
+      - VECTRA_MCP_PORT=8000
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+```
+
+Then run:
+```bash
+docker-compose up -d
+```
+
+**Available Tags:**
+- `latest`: Latest stable build from main branch
+- `main`: Latest build from main branch (same as latest)  
+- `v*`: Specific version tags (e.g., v1.0.0)
+
+> 💡 **Tip**: Pre-built images are automatically built and published via GitHub Actions whenever code is pushed to the main branch or when releases are tagged. This ensures you always get the latest tested version without needing to build locally.
+
+## Option 2: Build from Source
+
+For development or customization, you can build the Docker image from source.
+
+### Prerequisites
 
 1. **Install Docker and Docker Compose**
    - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
    - Or install Docker Engine and Docker Compose separately on Linux
 
-## Docker Setup Steps
+### Build from Source Steps
 
 1. **Clone/Download the project** to your local machine
 2. **Navigate to the project directory:**
@@ -214,9 +303,11 @@ Then edit the `.env` file with your actual Vectra AI Platform credentials.
 docker build -t vectra-mcp-server .
 ```
 
-5. **Choose your transport mode:**
+5. **Run the locally built image:**
 
-### Streamable HTTP Transport (Recommended for Production)
+Choose your transport mode and run with the locally built image:
+
+#### Streamable HTTP Transport
 ```bash
 docker run -d \
   --name vectra-mcp-server-http \
@@ -229,7 +320,7 @@ docker run -d \
   vectra-mcp-server
 ```
 
-### SSE Transport (Server-Sent Events)
+#### SSE Transport
 ```bash
 docker run -d \
   --name vectra-mcp-server-sse \
@@ -242,7 +333,7 @@ docker run -d \
   vectra-mcp-server
 ```
 
-### Stdio Transport (For Local MCP Clients)
+#### Stdio Transport
 ```bash
 docker run -d \
   --name vectra-mcp-server-stdio \
