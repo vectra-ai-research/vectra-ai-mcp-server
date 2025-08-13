@@ -33,8 +33,8 @@ RUN chown -R vectra:vectra /app && \
 # Switch to non-root user
 USER vectra
 
-# Update PATH to include user's local bin
-ENV PATH="/home/vectra/.local/bin:${PATH}"
+# Update PATH to include the virtual environment
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # Set environment variables for MCP server
 ENV VECTRA_MCP_TRANSPORT=stdio
