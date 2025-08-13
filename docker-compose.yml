@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  vectra-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vectra-mcp-server
+    ports:
+      - "8000:8000"
+    environment:
+      # Vectra API Configuration - Set these values
+      - VECTRA_BASE_URL=${VECTRA_BASE_URL}
+      - VECTRA_CLIENT_ID=${VECTRA_CLIENT_ID}
+      - VECTRA_CLIENT_SECRET=${VECTRA_CLIENT_SECRET}
+      - VECTRA_API_VERSION=${VECTRA_API_VERSION:-v3.4}
+      - VECTRA_OAUTH_TOKEN_URL=${VECTRA_OAUTH_TOKEN_URL}
+      
+      # Request Configuration
+      - VECTRA_REQUEST_TIMEOUT=${VECTRA_REQUEST_TIMEOUT:-30}
+      - VECTRA_RATE_LIMIT_REQUESTS=${VECTRA_RATE_LIMIT_REQUESTS:-100}
+      - VECTRA_RATE_LIMIT_PERIOD=${VECTRA_RATE_LIMIT_PERIOD:-60}
+      
+      # Cache Configuration
+      - VECTRA_CACHE_TTL=${VECTRA_CACHE_TTL:-300}
+      
+      # MCP Server Configuration
+      - VECTRA_MCP_TRANSPORT=${VECTRA_MCP_TRANSPORT:-stdio}
+      - VECTRA_MCP_HOST=${VECTRA_MCP_HOST:-0.0.0.0}
+      - VECTRA_MCP_PORT=${VECTRA_MCP_PORT:-8000}
+      - VECTRA_MCP_DEBUG=${VECTRA_MCP_DEBUG:-false}
+      
+      # Logging Configuration
+      - VECTRA_LOG_FILE=${VECTRA_LOG_FILE}
+    volumes:
+      # Optional: Mount logs directory for persistent logging
+      - ./logs:/app/logs:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "if [ \"$VECTRA_MCP_TRANSPORT\" = \"stdio\" ]; then echo 'Stdio transport - no HTTP endpoint to check' && exit 0; else curl -f --connect-timeout 5 --max-time 10 http://localhost:${VECTRA_MCP_PORT}/ || exit 1; fi"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - vectra-network
+
+networks:
+  vectra-network:
+    driver: bridge
+
+# Optional: Uncomment if you need persistent volumes
+# volumes:
+#   vectra-logs:
+#     driver: local
