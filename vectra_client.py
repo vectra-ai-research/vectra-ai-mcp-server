@@ -589,6 +589,10 @@ class VectraClient:
         """Create new assignment."""
         return await self._make_request("POST", "assignments", json_data=assignment_data)
     
+    async def delete_assignment(self, assignment_id: int) -> Dict[str, Any]:
+        """Get specific assignment by ID."""
+        return await self._make_request("DELETE", f"assignments/{assignment_id}")
+    
     async def update_assignment(self, assignment_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update existing assignment."""
         return await self._make_request("PATCH", f"assignments/{assignment_id}", json_data=update_data)
