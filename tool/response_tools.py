@@ -1,7 +1,5 @@
 """MCP tools for response actions."""
 
-from typing import Optional, Literal
-from pydantic import Field
 import json
 
 class ResponseMCPTools:
@@ -26,9 +24,6 @@ class ResponseMCPTools:
     ) -> str:
         """
         List entities that are currently in lockdown.
-        
-        Args:
-            None
         
         Returns:
             str: JSON string with list of entities in lockdown.

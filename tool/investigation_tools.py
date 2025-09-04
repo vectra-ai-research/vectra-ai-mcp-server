@@ -1,8 +1,10 @@
 """MCP tools for security investigations."""
 
-from typing import Optional, Literal, List
+from typing import Literal, List, Annotated
 from pydantic import Field
 import json
+
+from utils.validators import validate_date_range
 
 class InvestigationMCPTools:
     """MCP tools for investigations."""
@@ -21,6 +23,8 @@ class InvestigationMCPTools:
         """Register all investigation tools with the MCP server."""
         self.vectra_mcp.tool()(self.create_assignment)
         self.vectra_mcp.tool()(self.list_assignments)
+        self.vectra_mcp.tool()(self.list_assignments_for_user)
+        self.vectra_mcp.tool()(self.delete_assignment)
         self.vectra_mcp.tool()(self.get_assignment_detail_by_id)
         self.vectra_mcp.tool()(self.get_assignment_for_entity)
         self.vectra_mcp.tool()(self.create_entity_note)
@@ -28,21 +32,59 @@ class InvestigationMCPTools:
 
     async def list_assignments(
             self,
-            assignees: Optional[int] = Field(default=None, description="Vectra platform User ID to filter assignments by. Optional."),
-            resolved: Optional[bool] = Field(default=None, description="Filter assignments by resolved state. True for resolved, False for unresolved. Default is None (no filter)."),
+            resolved: Annotated[
+                bool, 
+                Field(description="Filter assignments by resolved state. True for resolved, False for unresolved. Default is False.")
+            ] = False,
+            created_after: Annotated[
+                str | None,
+                Field(description="Use this to list assignments created at or after this time stamp (YYYY-MM-DDTHH:MM:SS)")
+            ] = None
         ) -> str:
         """
-        List all investigation assignments with optional filtering by assignee and resolved state.
-
-        Args:
-            assignees (int):Vectra platform User ID to filter assignments by. Optional.
-            resolved (bool): Filter assignments by resolved state. True for resolved, False for unresolved. Default is None (no filter).
+        List all investigation assignments with optional filtering by timestamp and resolved state.
         
         Returns:
             str: JSON string with list of assignments.
         """
         try:
-            assignments = await self.client.get_assignments()
+            search_params = {"resolved" : resolved}
+
+            # Validate and convert date strings to datetime objects
+            start_date, end_date = validate_date_range(created_after, None)
+            if start_date:
+                search_params["created_after"] = start_date.isoformat()
+
+            assignments = await self.client.get_assignments(**search_params)
+
+            if assignments is None:
+                return "No assignments found."
+            return json.dumps(assignments, indent=2)
+        except Exception as e:
+            raise Exception(f"Failed to list assignments: {str(e)}")
+        
+    async def list_assignments_for_user(
+            self,
+            user_id: Annotated[
+                int, 
+                Field(description="Vectra platform user ID to retrieve assignments for.")
+            ],
+            resolved: Annotated[
+                bool, 
+                Field(description="Filter assignments by resolved state. True for resolved, False for unresolved. Default is False to retrieve only unresolved/open assignments.")
+            ] = False,
+        ) -> str:
+        """
+        List all investigation assignments assigned to a user/analyst.
+        
+        Returns:
+            str: JSON string with list of assignments.
+        """
+        try:
+            assignments = await self.client.get_assignments(
+                assignee = user_id,
+                resolved = resolved
+                )
             if assignments is None:
                 return "No assignments found."
             return json.dumps(assignments, indent=2)
@@ -51,14 +93,14 @@ class InvestigationMCPTools:
         
     async def get_assignment_detail_by_id(
         self,
-        assignment_id: int = Field(ge=1, description="ID of the assignment to retrieve")    
+        assignment_id: Annotated[
+            int,
+            Field(ge=1, description="ID of the assignment to retrieve")
+        ]    
     ) -> str:
         """
         Retrieve details of a specific investigation assignment.
 
-        Args:
-            assignment_id (int): The ID of the assignment to retrieve.
-        
         Returns:
             str: JSON string with details of the assignment.
         Raises:
@@ -73,16 +115,18 @@ class InvestigationMCPTools:
         
     async def get_assignment_for_entity(
         self,
-        entity_ids: List[int] = Field(description="List of entity IDs to retrieve assignment for"),
-        entity_type: Literal["host", "account"] = Field(description="Type of entity to retrieve assignment for (host or account)")
+        entity_ids: Annotated[
+            List[int], 
+            Field(description="List of entity IDs to retrieve assignment for")
+        ],
+        entity_type: Annotated[
+            Literal["host", "account"], 
+            Field(description="Type of entity to retrieve assignment for (host or account)")
+        ]
     ) -> str:
         """
         Retrieve investigation assignment for a specific account.
 
-        Args:
-            entity_ids (List[int]): List of entity IDs to retrieve assignment for.
-            entity_type (Literal["host", "account"]): Type of entity to retrieve assignment for (host or account).
-        
         Returns:
             str: JSON string with assignment details for the account.
         Raises:
@@ -113,67 +157,45 @@ class InvestigationMCPTools:
     
     async def create_assignment(
         self,
-        assign_account_id: Optional[int] = Field(default=None, description="ID of the account to assign. Optional if assigning a host"),
-        assign_host_id: Optional[int] = Field(default=None, description="ID of the host to assign. Optional if assigning an account"),
-        assign_to_user_id: int = Field(ge=1, description="ID of the user to assign the entity to"),
-        notes: Optional[str] = Field(default=None, description="Optional initial investigation notes for the assignment")
+        assign_to_user_id: Annotated[
+            int, 
+            Field(ge=1, description="ID of the user to assign the entity to")
+        ],
+        assign_entity_id: Annotated[
+            int, 
+            Field(description="ID of the entity (account or host) to assign.")
+        ],
+        assign_entity_type: Annotated[
+            Literal["account", "host"], 
+            Field(description="Type of the entity (account or host) to assign. This is the type of the entity specified in assign_entity_id")
+        ]
     ) -> str:
         """
         Create investigation assignment for an account or host
         
-        Args:
-            assign_account_id (int): ID of the account to assign. Optional if assigning a host.
-            assign_host_id (int): ID of the host to assign. Optional if assigning an account.
-            assign_to_user_id (int): ID of the user to assign the entity to.
-            notes (str) : Initial investigation notes for the assignment
         Returns:
             str: Formatted string with assignment details.
         Raises:
             Exception: If assignment creation fails.
         """
 
-        # all_users = self.client.get_users()
-        # assign_to = next((user['name'] for user in all_users if user['id'] == assign_to_user_id), None)
-        # if not assign_to:
-        #     raise ValueError(f"User with ID {assign_to_user_id} not found.")
-
-        if not assign_account_id and not assign_host_id:
-            raise ValueError("Either assign_account_id or assign_host_id must be provided.")
-
         # Prepare assignment data
         assignment_data = {
             "assign_to_user_id": assign_to_user_id,
         }
 
-        payload = json.dumps({
-            "assign_account_id": "534",
-            "assign_to_user_id": "95"
-            })
-
-        if assign_account_id:
-            assignment_data["assign_account_id"] = assign_account_id
-
-        if assign_host_id:
-            assignment_data["assign_host_id"] = assign_host_id
+        # Create payload based on entity type
+        if assign_entity_type == "account":
+            assignment_data["assign_account_id"] = assign_entity_id
+        else:
+            assignment_data["assign_host_id"] = assign_entity_id
 
         try:
             # Create the assignment
-            assignment = await self.client.create_assignment(assignment_data)
+            assignment = await self.client.delete_assignment(assignment_data)
             assignment_id = assignment.get("assignment").get("id")
             
-            # Add initial note if provided
-            if notes and assignment_id:
-                try:
-                    note_data = {
-                        "note": f"Assignment created: {notes}"
-                    }
-                    await self.client.add_note(note_data)
-                    assignment["note"] = note_data["note"]
-
-                except Exception as e:
-                    assignment["note"] = f"Assignment created but note failed: {str(e)}"
-            
-            # return "\n".join(result_parts)
+            # Return assignment details
             return json.dumps(assignment)
             
         except Exception as e:
@@ -181,17 +203,20 @@ class InvestigationMCPTools:
         
     async def create_entity_note(
             self,
-            entity_id: int = Field(ge=1, description="ID of the entity to add note to"),
-            entity_type: Literal["host", "account"] = Field(..., description="Type of entity to add note to (host or account)"),
-            note: str = Field(default=None, description="Note text to add to the entity")
+            entity_id: Annotated[
+                int, Field(ge=1, description="ID of the entity to add note to")
+            ],
+            entity_type: Annotated[
+                Literal["host", "account"], 
+                Field(description="Type of entity to add note to (host or account)")
+            ],
+            note: Annotated[
+                str, 
+                Field(description="Note text to add to the entity.")
+            ]
     ) -> str:
         """
         Add an investigation note to an entity (host or account).
-        
-        Args:
-            entity_id (int): ID of the entity to add note to.
-            entity_type (Literal["host", "account"]): Type of entity to add note to.
-            note (str): Note text to add to the entity.
         
         Returns:
             str: Confirmation message with note details.
@@ -210,23 +235,26 @@ class InvestigationMCPTools:
             params["note"] = note
 
             create_note = await self.client.add_entity_note(**params)
-            # return f"Note added to entity {entity_id}: {note}"
+
+            # Return note assignment details
             return json.dumps(create_note, indent=2)
         except Exception as e:
             raise Exception(f"Failed to add note to entity {entity_id}: {str(e)}")
         
     async def mark_detection_fixed(
         self,
-        detection_ids: List[int] = Field(default=None, description="List of detection IDs to mark as fixed or not fixed"),
-        mark_fixed: bool = Field(default=True, description="True to mark as fixed, False to unmark as fixed")
+        detection_ids: Annotated[
+            List[int], 
+            Field(description="List of detection IDs to mark as fixed or not fixed")
+        ],
+        mark_fixed: Annotated[
+            bool, 
+            Field(description="True to mark as fixed, False to unmark as fixed")
+        ]
     ) -> str:
         """
         Marks or unmark detection as fixed.
-        For marking as fixed, the detection will be closed as remediated indication it has been addressed.
-        
-        Args:
-            detection_ids (list): List of detection IDs to mark.
-            mark_fixed (bool): True to mark as fixed, False to unmark as fixed.
+        For marking as fixed, the detection will be closed as remediated, indicating it has been addressed.
         
         Returns:
             str: Confirmation message of operation.
@@ -241,3 +269,24 @@ class InvestigationMCPTools:
             return f"Marked {len(detection_ids)} detections as {'fixed' if mark_fixed else 'not fixed'}."
         except Exception as e:
             raise Exception(f"Failed to mark detections: {str(e)}")
+        
+    async def delete_assignment(
+        self,
+        assignment_id: Annotated[
+            int,
+            Field(ge=1, description="ID of the assignment to delete")
+        ]    
+    ) -> str:
+        """
+        Unassign or delete an investigation assignment by its ID. Use list_assignments and list_assignments_for_user to fetch assignment IDs.
+
+        Returns:
+            str: Confirmation message of deletion.
+        Raises:
+            Exception: If deleting assignment fails.
+        """
+        try:
+            await self.client.delete_assignment(assignment_id)
+            return f"Assignment {assignment_id} deleted successfully."
+        except Exception as e:
+            raise Exception(f"Failed to delete assignment {assignment_id}: {str(e)}")
