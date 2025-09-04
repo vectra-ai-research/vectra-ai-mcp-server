@@ -1,6 +1,6 @@
 """Entity tools for security investigations."""
 
-from typing import Optional, Literal
+from typing import Literal, Annotated
 from pydantic import Field, IPvAnyAddress
 import json
 
@@ -24,30 +24,44 @@ class EntityMCPTools:
         self.vectra_mcp.tool()(self.lookup_host_by_ip)
         self.vectra_mcp.tool()(self.get_host_details)
         self.vectra_mcp.tool()(self.get_account_details)
-
+    
     async def list_entities(
         self,
-        entity_type: Optional[Literal["account", "host"]] = Field(default=None, description="Filter by type of entities to retrieve. Options are 'account' or 'host'"),
-        state: Optional[Literal["active", "inactive"]] = Field(default="active", description="Filter by entity state (active, inactive)"),
-        name: Optional[str] = Field(default=None, description="Filter by entity name. Can also perform partial word match."),
-        host_ip: Optional[str] = Field(default=None, description="Filter by entity IP address. Only applicable for host entities."),
-        is_prioritized: Optional[bool] = Field(default=None, description="Filter for prioritized entities (True/False)"),
-        tags: Optional[str] = Field(default=None, description="Filter for entities with a particular tag"),
-        limit: Optional[int] = Field(default=None, description="Maximum number of detections to return in the batch. Default value is 100", ge = 1, le=1000),
-        ordering: Optional[Literal["urgency_score", "-urgency_score", "last_detection_timestamp", "-last_detection_timestamp", "last_modified_timestamp", "-last_modified_timestamp", "name", "-name"]] = Field(default="urgency_score", description="Order by urgency score, last_detection_timestamp, last_modified_timestamp or name. Use '-' prefix for descending order.")
+        entity_type: Annotated[
+            Literal["account", "host"], 
+            Field(description="Select type of entity to retrieve. Options are 'account' or 'host'.")
+        ],
+        state: Annotated[
+            Literal["active", "inactive"], 
+            Field(description="Filter by entity state (active, inactive)")
+        ] = "active",
+        ordering: Annotated[
+            Literal["urgency_score", "-urgency_score", "last_detection_timestamp", "-last_detection_timestamp", "last_modified_timestamp", "-last_modified_timestamp", "name", "-name"], 
+            Field(description="Order by 'urgency_score', '-urgency_score', 'last_detection_timestamp', '-last_detection_timestamp', 'last_modified_timestamp', '-last_modified_timestamp', 'name', '-name'. The '-' prefix indicates descending order.")
+        ] = "urgency_score",
+        name: Annotated[
+            str | None, 
+            Field(description="Filter by entity name. Can also perform partial word match.")
+        ] = None,
+        host_ip: Annotated[
+            IPvAnyAddress | None, 
+            Field(description="Filter by entity IP address. Only applicable for host entities.")
+        ] = None,
+        is_prioritized: Annotated[
+            bool, 
+            Field(description="Filter for prioritized entities or non-prioritized entities. Defaults to True to return only prioritized entities.")
+        ] = True,
+        tags: Annotated[
+            str | None, 
+            Field(description="Filter for entities with a particular tag")
+        ] = None,
+        limit: Annotated[
+            int, 
+            Field(description="Maximum number of detections to return in the batch. None means no limit", ge = 1, le=1000)
+        ] = 1000
     )-> str:
         """
-        List entities in platform based on various filters.
-        
-        Args:
-            entity_type (str): Type of entities to retrieve. Options are 'account' or 'host'.
-            state (str): Filter by entity state (active, inactive). Defaults to 'active'.
-            name (str): Filter by entity name. Can also perform partial word match.
-            host_ip (str): Filter by entity IP address. Only applicable for host entities.
-            is_prioritized (bool): Filter for prioritized entities (True/False).
-            tags (str): Filter for entities with a particular tag.
-            limit (int): Maximum number of entities to return in the batch.
-            ordering (str): Order by urgency score, last_detection_timestamp, last_modified_timestamp or name. Use '-' prefix for descending order.
+        List entities (hosts & accounts) in Vectra platform based on various filters. This tool returns entities with all their detailed information.
 
         Returns:
             str: Formatted string with list of detections.
@@ -83,16 +97,13 @@ class EntityMCPTools:
             return json.dumps({"total_count": total_count, "entities": entities}, indent=2)
         except Exception as e:
             raise Exception(f"Failed to fetch entities: {str(e)}")
-        
+     
     async def get_account_details(
         self,
-        account_id: int = Field(default=None, description="ID of the account in Vectra platform to retrieve details for", ge=1)
+        account_id: Annotated[int, Field(description="ID of the account in Vectra platform to retrieve details for", ge=1)]
     ) -> str:
         """
         Get complete detailed information about a specific account entity.
-        
-        Args:
-            account_id (int): ID of the account in Vectra platform to retrieve.
         
         Returns:
             str: Formatted string with detailed information about the account entity. 
@@ -115,13 +126,10 @@ class EntityMCPTools:
         
     async def lookup_entity_info_by_name(
             self,
-            entity_name: str = Field(default=None, description="Name or partial name of the entity to look up. No spaces allowed.")
+            entity_name: Annotated[str, Field(description="Name or partial name of the entity to look up. No spaces allowed.")]
     ):
         """
         Retrieve information about an entity (account or host) by its name. Search is case-insensitive and can match partial names.
-        
-        Args:
-            entity_name (str): Name or partial name of the entity to look up. No spaces allowed.
 
         Returns:
             str: Formatted string with entity information including name, ID, type, last detection timestamp, prioritization status, urgency score, state, and IP address (when available).
@@ -161,13 +169,10 @@ class EntityMCPTools:
         
     async def get_host_details(
         self,
-        host_id: int = Field(default=None, description="ID of the host entity to retrieve details for", ge=1)
+        host_id: Annotated[int, Field(description="ID of the host entity to retrieve details for", ge=1)]
     ):
         """
         Get complete detailed information about a specific host entity.
-        
-        Args:
-            host_id (int): ID of the host entity in Vectra platform to retrieve details for.
         
         Returns:
             str: Formatted string with detailed information about the host entity. 
@@ -187,14 +192,11 @@ class EntityMCPTools:
         
     async def lookup_host_by_ip(
             self,
-            host_ip: IPvAnyAddress = Field(default=None, description="IP address of the host to look up. Must be a valid IPv4 or IPv6 address.")
+            host_ip: Annotated[IPvAnyAddress, Field(description="IP address of the host to look up. Must be a valid IPv4 or IPv6 address.")]
     ):
         """
         Retrieve information about a host entity by its IP address.
         
-        Args:
-            host_ip (IPvAnyAddress): IP address of the host to look up. Must be a valid IPv4 or IPv6 address.
-
         Returns:
             str: Formatted string with host information including name, ID, type, last detection timestamp, prioritization status, urgency score, state, and IP address.
             If no hosts are found with the specified IP address, returns a message indicating that no matches were found.
