@@ -406,9 +406,31 @@ class VectraClient:
         else:
             return await self._make_request("GET", "accounts", params=params)
     
-    async def get_account(self, account_id: int) -> Dict[str, Any]:
-        """Get specific account by ID."""
-        return await self._make_request("GET", f"accounts/{account_id}")
+    async def get_account(
+        self, 
+        account_id: int,
+        fields: Optional[List[str]] = None,
+        exclude_fields: Optional[List[str]] = None,
+        include_access_history: Optional[bool] = None,
+        include_detection_summaries: Optional[bool] = None,
+        include_external: Optional[bool] = None,
+        src_linked_account: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get specific account by ID with optional field filtering and additional parameters."""
+        params = {}
+        if fields:
+            params["fields"] = ",".join(fields)
+        if exclude_fields:
+            params["exclude_fields"] = ",".join(exclude_fields)
+        if include_access_history is not None:
+            params["include_access_history"] = include_access_history
+        if include_detection_summaries is not None:
+            params["include_detection_summaries"] = include_detection_summaries
+        if include_external is not None:
+            params["include_external"] = include_external
+        if src_linked_account:
+            params["src_linked_account"] = src_linked_account
+        return await self._make_request("GET", f"accounts/{account_id}", params=params)
     
     # Host endpoints
     async def get_hosts(
