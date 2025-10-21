@@ -110,27 +110,27 @@ class EntityMCPTools:
             Field(description="Fields to exclude in the response object. Accepts comma-separated list.")
         ] = None,
         include_access_history: Annotated[
-            bool | None, 
+            bool, 
             Field(description="Include account access history in the response")
-        ] = None,
+        ] = False,
         include_detection_summaries: Annotated[
-            bool | None, 
-            Field(description="Include detection summaries in the response")
-        ] = None,
+            bool, 
+            Field(description="Include detection summaries for the detections on the account in the response object.")
+        ] = True,
         include_external: Annotated[
-            bool | None, 
-            Field(description="Include external data in the response")
-        ] = None,
+            bool, 
+            Field(description="Include external data in the response object.")
+        ] = False,
         src_linked_account: Annotated[
             str | None, 
             Field(description="Source linked account filter")
-        ] = None
+        ] = False
     ) -> str:
         """
-        Get complete detailed information about a specific account entity using the v3.4 accounts API endpoint.
+        Get complete detailed information about a specific account entity. This tool returns account details including detections, scoring information, associated accounts, access history, detection summaries, external data, and more. Response can be customized using various parameters to include or exclude specific fields and related data.
         
         Returns:
-            str: Formatted string with detailed information about the account. It includes detections, scoring information, associated accounts, access history, detection summaries, external data, and more.
+            str: JSON string with detailed information about the account. It includes detections, scoring information, associated accounts, access history, detection summaries, external data, and more.
             If the account is not found, returns a message indicating that no account was found with the specified ID.
             If an error occurs during the request, raises an exception with the error message.
         """
