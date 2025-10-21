@@ -100,23 +100,53 @@ class EntityMCPTools:
      
     async def get_account_details(
         self,
-        account_id: Annotated[int, Field(description="ID of the account in Vectra platform to retrieve details for", ge=1)]
+        account_id: Annotated[int, Field(description="ID of the account in Vectra platform to retrieve details for", ge=1)],
+        fields: Annotated[
+            list[str] | None, 
+            Field(description="Fields to return in the results. Available fields: id, url, account_type, assignment, associated_accounts, certainty, data_source, detection_set, detection_summaries, last_detection_timestamp, name, note, note_modified_by, note_modified_timestamp, notes, past_assignments, privilege_category, privilege_level, probable_home, sensors, severity, state, tags, threat")
+        ] = None,
+        exclude_fields: Annotated[
+            list[str] | None, 
+            Field(description="Fields to exclude in the response object. Accepts comma-separated list.")
+        ] = None,
+        include_access_history: Annotated[
+            bool, 
+            Field(description="Include account access history in the response")
+        ] = False,
+        include_detection_summaries: Annotated[
+            bool, 
+            Field(description="Include detection summaries for the detections on the account in the response object.")
+        ] = True,
+        include_external: Annotated[
+            bool, 
+            Field(description="Include external data in the response object.")
+        ] = False,
+        src_linked_account: Annotated[
+            str | None, 
+            Field(description="Source linked account filter")
+        ] = False
     ) -> str:
         """
-        Get complete detailed information about a specific account entity.
+        Get complete detailed information about a specific account entity. This tool returns account details including detections, scoring information, associated accounts, access history, detection summaries, external data, and more. Response can be customized using various parameters to include or exclude specific fields and related data.
         
         Returns:
-            str: Formatted string with detailed information about the account entity. 
+            str: JSON string with detailed information about the account. It includes detections, scoring information, associated accounts, access history, detection summaries, external data, and more.
             If the account is not found, returns a message indicating that no account was found with the specified ID.
             If an error occurs during the request, raises an exception with the error message.
         """
         try:
-            # Fetch account details using the client
-            account_details = await self.client.get_entity(
-                entity_id = account_id, 
-                entity_type = "account"  # Specify the type as account
+            # Fetch account details using the v3.4 accounts API endpoint
+            account_details = await self.client.get_account(
+                account_id=account_id,
+                fields=fields,
+                exclude_fields=exclude_fields,
+                include_access_history=include_access_history,
+                include_detection_summaries=include_detection_summaries,
+                include_external=include_external,
+                src_linked_account=src_linked_account
             )
-            # Check if the host was found
+            
+            # Check if the account was found
             if 'detail' in account_details and account_details['detail'] == 'Not found.':
                 return f"No account found with ID: {account_id}."
             
