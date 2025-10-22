@@ -107,7 +107,7 @@ class EntityMCPTools:
         ] = None,
         exclude_fields: Annotated[
             list[str] | None, 
-            Field(description="Fields to exclude in the response object. Accepts comma-separated list.")
+            Field(description="Fields to exclude in the response object. Accepts comma-separated list. Available fields: 'id', 'url', 'name', 'state', 'threat', 'certainty', 'severity', 'account_type', 'tags', 'note', 'notes', 'note_modified_by', 'note_modified_timestamp', 'privilege_level', 'privilege_category', 'last_detection_timestamp', 'detection_set', 'probable_home'.")
         ] = None,
         include_access_history: Annotated[
             bool, 
@@ -124,7 +124,7 @@ class EntityMCPTools:
         src_linked_account: Annotated[
             str | None, 
             Field(description="Source linked account filter")
-        ] = False
+        ] = None
     ) -> str:
         """
         Get complete detailed information about a specific account entity. This tool returns account details including detections, scoring information, associated accounts, access history, detection summaries, external data, and more. Response can be customized using various parameters to include or exclude specific fields and related data.
