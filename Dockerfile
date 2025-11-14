@@ -48,6 +48,23 @@ LABEL maintainer="Vectra AI MCP Server" \
       security.non-root="true" \
       security.user="vectra"
 
+# Docker catalog metadata
+LABEL io.docker.server.metadata="name: vectra-ai-rux-mcp-server\n\
+image: mcp/vectra-ai-rux-mcp-server\n\
+type: server\n\
+config:\n\
+  secrets:\n\
+    - name: vectra-ai-rux-mcp-server.vectra_client_secret\n\
+      env: VECTRA_CLIENT_SECRET\n\
+      example: '••••••••'\n\
+  environment:\n\
+    - name: VECTRA_BASE_URL\n\
+      value: '{{vectra_base_url}}'\n\
+      example: 'https://1234.abc.portal.vectra.ai'\n\
+    - name: VECTRA_CLIENT_ID\n\
+      value: '{{vectra_client_id}}'\n\
+      example: '1234567890abcdef'"
+
 # Expose port for HTTP transports (SSE and Streamable HTTP)
 EXPOSE 8000
 
