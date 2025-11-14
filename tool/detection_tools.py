@@ -1,7 +1,7 @@
 """Detection analysis tools for security investigations."""
 
-from typing import Optional, Literal, List, Dict, Any
-from pydantic import Field
+from typing import Literal, Annotated
+from pydantic import Field, IPvAnyAddress
 import json
 import base64
 
@@ -33,16 +33,17 @@ class DetectionMCPTools:
     
     async def get_detection_details(
         self,
-        detection_id: int = Field(ge=1, description="ID of the detection to retrieve details for")
+        detection_id: Annotated[
+            int, 
+            Field(ge=1, description="ID of the detection to retrieve details for")
+        ]
     ) -> str:
         """
         Get complete detailed information for a particular detection.
         
-        Args:
-            detection_id (int): The ID of the detection to retrieve.
-        
         Returns:
             str: JSON string with detection details.
+
         Raises:
             Exception: If fetching detection details fails.
         """
@@ -56,29 +57,45 @@ class DetectionMCPTools:
 
     async def list_detections_with_details(
         self,
-        detection_category: Optional[Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"]] = Field(default=None, description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match"),
-        detection_name: Optional[str] = Field(default=None, description="Filter by detection name. Can also perform partial word match"),
-        state: Optional[Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"]] = Field(default="active", description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'."),
-        src_ip: str = Field(default=None, description="Filter by source IP address of the host that generated the detection"),
-        start_date: str = Field(default=None, description="Filter by start date (YYYY-MM-DD)"),
-        end_date: str = Field(default=None, description="Filter by end date (YYYY-MM-DD)"),
-        is_targeting_key_asset: bool = Field(default=None, description="Filter by detection targets a key asset"),
-        limit: Optional[int] = Field(default=None, description="Maximum number of detections to return in the batch.", ge = 1, le=1000),
-        ordering: Optional[Literal['created_datetime', 'last_timestamp', 'id']] = Field(default=None, description="Order by last_timestamp, created_datetime, or id")
+        ordering: Annotated[
+            Literal['created_datetime', 'last_timestamp', 'id'], 
+            Field(description="Order by last_timestamp, created_datetime, or id. Defaults to ordering by last_timestamp")
+        ] = "last_timestamp",
+        detection_category: Annotated[
+            Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"] | None, 
+            Field(description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match")
+        ] = None,
+        detection_name: Annotated[
+            str | None, 
+            Field(description="Filter by detection name. Can also perform partial word match")
+        ] = None,
+        state: Annotated[
+            Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"] | None, 
+            Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'.")
+        ] = "active",
+        src_ip: Annotated[
+            IPvAnyAddress | None, 
+            Field(description="Filter by source IP address of the host that generated the detection. Must be a valid IPv4 or IPv6 address.")
+        ] = None,
+        start_date: Annotated[
+            str | None, 
+            Field(description="Filter by start date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        end_date: Annotated[
+            str | None, 
+            Field(description="Filter by end date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        is_targeting_key_asset: Annotated[
+            bool, 
+            Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")
+        ] = False,
+        limit: Annotated[
+            int, 
+            Field(description="Maximum number of detections to return in the batch. Defaults to 1000", ge = 1, le=1000)
+        ] = 1000
     )-> str:
         """
         List detections with filtering and sorting options. Use this to get a detailed list of detections based on various criteria.
-        
-        Args:
-            detection_category (Optional[str]): Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match.
-            detection_name (Optional[str]): Filter by detection name. Can also perform partial word match.
-            state (Optional[str]): Filter by state (active, inactive, fixed). Default is 'active'.
-            src_ip (Optional[str]): Filter by source IP address of the host that generated the detection.
-            start_date (Optional[str]): Filter by start date (YYYY-MM-DD).
-            end_date (Optional[str]): Filter by end date (YYYY-MM-DD).
-            is_targeting_key_asset (Optional[bool]): Filter by key asset targeting.
-            limit (Optional[int]): Maximum number of detections to return if the total count exceeds this limit. Default is None (no limit).
-            ordering (Optional[str]): Order by last_timestamp, created_datetime, or id.
 
         Returns:
             str: JSON string with list of detections.
@@ -94,9 +111,9 @@ class DetectionMCPTools:
         if detection_name:
             search_params['detection_type'] = detection_name
         
-        # Validate date range
-        start_date, end_date = validate_date_range(start_date, end_date)
         # Add date filters if provided
+        # Validate and convert date strings to datetime objects
+        start_date, end_date = validate_date_range(start_date, end_date)
         if start_date:
             search_params["last_timestamp_gte"] = start_date.isoformat()
         if end_date:
@@ -124,25 +141,37 @@ class DetectionMCPTools:
 
     async def get_detection_count(
         self,
-        detection_category: Optional[Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"]] = Field(default=None, description="Filter by detection category"),
-        detection_name: Optional[str] = Field(default=None, description="Filter by detection name. Can also perform partial word match"),
-        state: Optional[Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"]] = Field(default="active", description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'."),
-        src_ip: Optional[str] = Field(default=None, description="Filter by source IP address of the host that generated the detection."),
-        start_date: Optional[str] = Field(default=None, description="Filter by start date (YYYY-MM-DD)"),
-        end_date: Optional[str] = Field(default=None, description="Filter by end date (YYYY-MM-DD)"),
-        is_targeting_key_asset: Optional[bool] = Field(default=None, description="Filter by detection targets a key asset")
+        start_date: Annotated[
+            str | None, 
+            Field(description="Filter by start date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        end_date: Annotated[
+            str | None, 
+            Field(description="Filter by end date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        detection_category: Annotated[
+            Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"] | None, 
+            Field(description="Filter by detection category")
+        ] = None,
+        state: Annotated[
+            Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"] | None, 
+            Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active' which returns only currently active detections.")
+        ] = "active",
+        detection_name: Annotated[
+            str | None, 
+            Field(description="Filter by detection name. Can also perform partial word match")
+        ] = None,
+        src_ip: Annotated[
+            IPvAnyAddress | None, 
+            Field(description="Filter by source IP address of the host that generated the detection.")
+        ] = None,
+        is_targeting_key_asset: Annotated[
+            bool, 
+            Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")
+        ] = False
     ) -> str:
         """
         Get the total count of detections matching the specified criteria.
-        
-        Args:
-            detection_category (str): Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match.
-            detection_name (str): Filter by detection name. Can also perform partial word match.
-            state (str): Filter by state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'.
-            src_ip (str): Filter by source IP address of the host that generated the detection.
-            start_date (str): Filter by start date (YYYY-MM-DD).
-            end_date (str): Filter by end date (YYYY-MM-DD).
-            is_targeting_key_asset (Optional[bool]): Filter by detection targets a key asset.
 
         Returns:
             str: Count of detections matching the criteria.
@@ -153,9 +182,8 @@ class DetectionMCPTools:
         search_params = {k: v for k, v in params.items()
                    if v is not None and k not in exclude_params}
 
-        # Validate date range
-        start_date, end_date = validate_date_range(start_date, end_date)
         # Add date filters if provided
+        start_date, end_date = validate_date_range(start_date, end_date)
         if start_date:
             search_params["last_timestamp_gte"] = start_date.isoformat()
         if end_date:
@@ -168,16 +196,17 @@ class DetectionMCPTools:
     
     async def get_detection_pcap(
         self,
-        detection_id: int = Field(ge=1, description="ID of the detection to retrieve pcap for")
+        detection_id: Annotated[
+            int, 
+            Field(ge=1, description="ID of the detection to retrieve pcap for")
+        ]
     ) -> str:
         """
         Get pcap file for a specific detection.
         
-        Args:
-            detection_id (int): The ID of the detection to retrieve pcap for.
-        
         Returns:
             str: Base64 encoded pcap data or error message.
+
         Raises:
             Exception: If retrieval fails.
         """
@@ -197,15 +226,18 @@ class DetectionMCPTools:
         
     async def list_entity_detections(
         self,
-        entity_id: int = Field(ge=1, description="ID of the entity to list detections for"),
-        state: Optional[Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"]] = Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'.")
+        entity_id: Annotated[
+            int, 
+            Field(ge=1, description="ID of the entity to list detections for")
+        ],
+        state: Annotated[
+            Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"] | None, 
+            Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'. If no value specified (None), returns detection with all states.")
+        ] = "active"
     ) -> str:
         """
         List all detections with full details for a specific entity. 
         
-        Args:
-            entity_id (int): The ID of the entity to list detections for.
-            state (Optional[str]): Optionally filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule).
         Returns:
             str: JSON string with list of detections for the entity.
         """
@@ -233,30 +265,34 @@ class DetectionMCPTools:
         
     async def list_detections_with_basic_info(
         self,
-        detection_category: Optional[Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"]] = Field(default=None, description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match"),
-        detection_name: Optional[str] = Field(default=None, description="Filter by detection name. Can also perform partial word match"),
-        state: Optional[Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"]] = Field(default="active", description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'."),
-        src_ip: str = Field(default=None, description="Filter by source IP address of the host that generated the detection"),
-        start_date: str = Field(default=None, description="Filter by start date (YYYY-MM-DD)"),
-        end_date: str = Field(default=None, description="Filter by end date (YYYY-MM-DD)"),
-        is_targeting_key_asset: bool = Field(default=None, description="Filter by detection targets a key asset"),
-        limit: Optional[int] = Field(default=None, description="Maximum number of detections to return in the batch.", ge = 1, le=1000),
-        ordering: Optional[Literal['created_datetime', 'last_timestamp', 'id']] = Field(default=None, description="Order by last_timestamp, created_datetime, or id")
+        state: Annotated[
+            Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"] | None, 
+            Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'.")
+        ] = "active",
+        ordering: Annotated[
+            Literal['created_datetime', 'last_timestamp', 'id'] | None, 
+            Field(description="Order by last_timestamp, created_datetime, or id. Defaults to 'last_timestamp'")
+        ] = "last_timestamp",
+        detection_category: Annotated[
+            Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"] | None, 
+            Field(description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match")
+        ] = None,
+        detection_name: Annotated[
+            str | None, 
+            Field(description="Filter by detection name. Can also perform partial word match")
+        ] = None,
+        src_ip: Annotated[
+            IPvAnyAddress | None, 
+            Field(description="Filter by source IP address of the host that generated the detection")
+        ] = None,
+        start_date: Annotated[str | None, Field(description="Filter by start date (YYYY-MM-DDTHH:MM:SS)")] = None,
+        end_date: Annotated[str | None, Field(description="Filter by end date (YYYY-MM-DDTHH:MM:SS)")] = None,
+        is_targeting_key_asset: Annotated[bool, Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")] = False,
+        limit: Annotated[int, Field(description="Maximum number of detections to return in the batch.", ge = 1, le=1000)] = None
     )-> str:
         """
         List detections with basic information and filtering options. Use this to get a quick overview of detections without detailed information.
         
-        Args:
-            detection_category (Optional[str]): Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match.
-            detection_name (Optional[str]): Filter by detection name. Can also perform partial word match.
-            state (Optional[str]): Filter by state (active, inactive, fixed). Default is 'active'.
-            src_ip (Optional[str]): Filter by source IP address of the host that generated the detection.
-            start_date (Optional[str]): Filter by start date (YYYY-MM-DD).
-            end_date (Optional[str]): Filter by end date (YYYY-MM-DD).
-            is_targeting_key_asset (Optional[bool]): Filter by key asset targeting.
-            limit (Optional[int]): Maximum number of detections to return if the total count exceeds this limit. Default is None (no limit).
-            ordering (Optional[str]): Order by last_timestamp, created_datetime, or id.
-
         Returns:
             str: JSON string with list of detections ids.
         """
@@ -271,9 +307,9 @@ class DetectionMCPTools:
         if detection_name:
             search_params['detection_type'] = detection_name
         
-        # Validate date range
-        start_date, end_date = validate_date_range(start_date, end_date)
         # Add date filters if provided
+        # Validate and convert date strings to datetime objects
+        start_date, end_date = validate_date_range(start_date, end_date)
         if start_date:
             search_params["last_timestamp_gte"] = start_date.isoformat()
         if end_date:
@@ -298,30 +334,29 @@ class DetectionMCPTools:
                     'state': dets.get('state', 'unknown'),
                     'entity_type': dets.get('type', 'unknown')
                 }
-                for dets in detection_list
+                for dets in detections
             ]
 
-        response = {"detection_count": total_count, "detections": detections}
+        response = {"detection_count": total_count, "detections": detection_list}
         
         if limit:
             if total_count > limit:
             # Limit the number of detections returned to reduce response size
                 detections = detections[:limit]
                 response["note"] = f"Results limited to {limit} detections. Total detections found: {total_count}."
-                response["detections"] = detections
+                response["detections"] = detection_list
             
         return json.dumps(response, indent=2)
     
-
     async def get_detection_summary(
         self,
-        detection_id: int = Field(ge=1, description="ID of the detection to retrieve summary for")
+        detection_id: Annotated[
+            int, 
+            Field(ge=1, description="ID of the detection to retrieve summary for")
+        ]
     ) -> str:
         """
         Get a concise summary of a detection including its ID, name, category, last timestamp, triage status, state, entity type, and detection summary. The detection summary includes key details about the detection including event specific details and description.
-        
-        Args:
-            detection_id (int): The ID of the detection to retrieve summary for.
         
         Returns:
             str: Formatted string with detection summary.
@@ -349,29 +384,45 @@ class DetectionMCPTools:
         
     async def list_detection_ids(
         self,
-        detection_category: Optional[Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"]] = Field(default=None, description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match"),
-        detection_name: Optional[str] = Field(default=None, description="Filter by detection name. Can also perform partial word match"),
-        state: Optional[Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"]] = Field(default="active", description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'."),
-        src_ip: str = Field(default=None, description="Filter by source IP address of the host that generated the detection"),
-        start_date: str = Field(default=None, description="Filter by start date (YYYY-MM-DD)"),
-        end_date: str = Field(default=None, description="Filter by end date (YYYY-MM-DD)"),
-        is_targeting_key_asset: bool = Field(default=None, description="Filter by detection targets a key asset"),
-        limit: Optional[int] = Field(default=None, description="Maximum number of detections to return in the batch.", ge = 1, le=1000),
-        ordering: Optional[Literal['created_datetime', 'last_timestamp', 'id']] = Field(default=None, description="Order by last_timestamp, created_datetime, or id")
+        ordering: Annotated[
+            Literal['created_datetime', 'last_timestamp', 'id'] | None, 
+            Field(description="Order by last_timestamp, created_datetime, or id")
+        ] = "last_timestamp",
+        state: Annotated[
+            Literal["active", "inactive", "fixed", "filteredbyai", "filteredbyrule"] | None, 
+            Field(description="Filter by detection state (active, inactive, fixed, filteredbyai, filteredbyrule). Default is 'active'.")
+        ] = "active",
+        detection_category: Annotated[
+            Literal["command", "botnet", "lateral", "reconnaissance", "exfiltration", "info"] | None, 
+            Field(description="Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match")
+        ] = None,
+        detection_name: Annotated[
+            str | None, 
+            Field(description="Filter by detection name. Can also perform partial word match")
+        ] = None,
+        src_ip: Annotated[
+            IPvAnyAddress | None, 
+            Field(description="Filter by source IP address of the host that generated the detection")
+        ] = None,
+        start_date: Annotated[
+            str | None, 
+            Field(description="Filter by start date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        end_date: Annotated[
+            str | None, 
+            Field(description="Filter by end date (YYYY-MM-DDTHH:MM:SS)")
+        ] = None,
+        is_targeting_key_asset: Annotated[
+            bool, 
+            Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")
+        ] = False,
+        limit: Annotated[
+            int, 
+            Field(description="Maximum number of detections to return in the batch. Defaults to 1000.", ge = 1, le=1000)
+        ] = 1000
     )-> str:
         """
         List detection IDs with filtering and sorting options. Use this to get a list of detection IDs based on various criteria.
-        
-        Args:
-            detection_category (Optional[str]): Filter by detection category. Detections are grouped into one of the following categories: Command & Control, Botnet, Exfiltration, Lateral Movement, Reconnaissance, Info. Can also perform partial word match.
-            detection_name (Optional[str]): Filter by detection name. Can also perform partial word match.
-            state (Optional[str]): Filter by state (active, inactive, fixed). Default is 'active'.
-            src_ip (Optional[str]): Filter by source IP address of the host that generated the detection.
-            start_date (Optional[str]): Filter by start date (YYYY-MM-DD).
-            end_date (Optional[str]): Filter by end date (YYYY-MM-DD).
-            is_targeting_key_asset (Optional[bool]): Filter by key asset targeting.
-            limit (Optional[int]): Maximum number of detections to return if the total count exceeds this limit. Default is None (no limit).
-            ordering (Optional[str]): Order by last_timestamp, created_datetime, or id.
 
         Returns:
             str: JSON string with list of detection IDs.
@@ -387,9 +438,9 @@ class DetectionMCPTools:
         if detection_name:
             search_params['detection_type'] = detection_name
         
-        # Validate date range
-        start_date, end_date = validate_date_range(start_date, end_date)
         # Add date filters if provided
+        # Validate and convert date strings to datetime objects
+        start_date, end_date = validate_date_range(start_date, end_date)
         if start_date:
             search_params["last_timestamp_gte"] = start_date.isoformat()
         if end_date:
