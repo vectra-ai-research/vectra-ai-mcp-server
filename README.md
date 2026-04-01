@@ -43,17 +43,41 @@ pip install uv
 cd your-project-directory
 ```
 
-3. **Configure environment variables:**
-```
+3. **Configure credentials:**
+
+#### Option A: Single Tenant (`.env` file)
+```bash
 # Copy the example environment file
 cp .env.example .env
 ```
-Then edit the .env file with your actual Vectra AI Platform credentials. 
+Then edit the `.env` file with your actual Vectra AI Platform credentials.
 Required variables to update:
 
 * `VECTRA_BASE_URL`: Your Vectra portal URL
 * `VECTRA_CLIENT_ID`: Your client ID from Vectra
 * `VECTRA_CLIENT_SECRET`: Your client secret from Vectra
+
+#### Option B: Multiple Tenants (YAML config)
+If you have multiple Vectra tenants, use a YAML configuration file instead:
+```bash
+cp tenants.yaml.example tenants.yaml
+```
+Then edit `tenants.yaml` with your tenant details:
+```yaml
+tenants:
+  - name: prod
+    base_url: https://prod-tenant.uw2.portal.vectra.ai
+    client_id: "<prod-client-id>"
+    client_secret: "<prod-client-secret>"
+
+  - name: staging
+    base_url: https://staging-tenant.uw2.portal.vectra.ai
+    client_id: "<staging-client-id>"
+    client_secret: "<staging-client-secret>"
+```
+Each tenant gets its own set of tools prefixed with the tenant name (e.g., `prod_list_detections`, `staging_list_detections`). A `list_tenants` meta-tool is also added to discover available tenants.
+
+Per-tenant values can be overridden via environment variables using the pattern `VECTRA_TENANT_<NAME>_<FIELD>` (e.g., `VECTRA_TENANT_PROD_CLIENT_SECRET`). This is useful for Docker/Kubernetes where secrets should not be stored in files.
 
 4. **Create and activate a virtual environment:**
 ```
@@ -88,6 +112,10 @@ python server.py --transport sse --host 0.0.0.0 --port 8000
 # Run with streamable-http transport (for production HTTP deployments)
 python server.py --transport streamable-http --host 0.0.0.0 --port 8000
 
+# Run with multi-tenant YAML config
+python server.py --config tenants.yaml
+python server.py -c tenants.yaml --transport sse
+
 # Enable debug logging
 python server.py --debug
 ```
@@ -120,7 +148,9 @@ notepad %APPDATA%/Claude/claude_desktop_config.json
 ```
 
 Add the following configuration to the `mcpServers` section (update the paths to match your setup):
-```
+
+**Single Tenant:**
+```json
 {
   "mcpServers": {
     "vectra-ai-mcp": {
@@ -136,17 +166,19 @@ Add the following configuration to the `mcpServers` section (update the paths to
 }
 ```
 
-Example with actual paths:
-```
+**Multi-Tenant:**
+```json
 {
   "mcpServers": {
     "vectra-ai-mcp": {
-      "command": "/Users/yourusername/.local/bin/uv",
+      "command": "/path/to/your/uv/binary",
       "args": [
         "--directory",
-        "/Users/yourusername/path/to/vectra-mcp-project",
+        "/path/to/your/project/directory",
         "run",
-        "server.py"
+        "server.py",
+        "--config",
+        "tenants.yaml"
       ]
     }
   }
@@ -343,6 +375,38 @@ docker run -d \
   vectra-mcp-server
 ```
 
+## Docker Multi-Tenant Setup
+
+To run the server in multi-tenant mode with Docker:
+
+1. Create a `tenants.yaml` file (see `tenants.yaml.example`).
+2. Mount it into the container and set `VECTRA_CONFIG_FILE`:
+
+```bash
+docker run -d \
+  --name vectra-mcp-server \
+  -e VECTRA_CONFIG_FILE=/app/tenants.yaml \
+  -e VECTRA_MCP_TRANSPORT=streamable-http \
+  -e VECTRA_MCP_HOST=0.0.0.0 \
+  -e VECTRA_MCP_PORT=8000 \
+  -v ./tenants.yaml:/app/tenants.yaml:ro \
+  -p 8000:8000 \
+  --restart unless-stopped \
+  ghcr.io/vectra-ai-research/vectra-ai-mcp-server:latest
+```
+
+You can inject secrets per-tenant via environment variables instead of storing them in the YAML file:
+```bash
+docker run -d \
+  --name vectra-mcp-server \
+  -e VECTRA_CONFIG_FILE=/app/tenants.yaml \
+  -e VECTRA_TENANT_PROD_CLIENT_SECRET=<secret> \
+  -e VECTRA_TENANT_STAGING_CLIENT_SECRET=<secret> \
+  -v ./tenants.yaml:/app/tenants.yaml:ro \
+  -p 8000:8000 \
+  ghcr.io/vectra-ai-research/vectra-ai-mcp-server:latest
+```
+
 ## Docker Environment Variables
 
 The Docker container supports all the same environment variables as the local setup, plus additional MCP server configuration:
@@ -352,6 +416,17 @@ The Docker container supports all the same environment variables as the local se
 - `VECTRA_MCP_HOST`: Host to bind to for HTTP transports - default: `0.0.0.0`
 - `VECTRA_MCP_PORT`: Port for HTTP transports - default: `8000`
 - `VECTRA_MCP_DEBUG`: Enable debug logging - default: `false`
+- `VECTRA_CONFIG_FILE`: Path to YAML config file for multi-tenant mode (optional)
+
+### Multi-Tenant Override Variables
+When using a YAML config file, per-tenant settings can be overridden via environment variables:
+- `VECTRA_TENANT_<NAME>_BASE_URL`
+- `VECTRA_TENANT_<NAME>_CLIENT_ID`
+- `VECTRA_TENANT_<NAME>_CLIENT_SECRET`
+- `VECTRA_TENANT_<NAME>_API_VERSION`
+- `VECTRA_TENANT_<NAME>_REQUEST_TIMEOUT`
+
+Where `<NAME>` is the tenant name in uppercase (e.g., `VECTRA_TENANT_PROD_CLIENT_SECRET`).
 
 ### Accessing the HTTP Server
 

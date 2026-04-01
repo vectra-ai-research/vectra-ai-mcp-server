@@ -1,0 +1,41 @@
+# Multi-tenant configuration for Vectra MCP Server
+#
+# Each tenant gets its own set of tools, prefixed with the tenant name.
+# For example, a tenant named "prod" will have tools like:
+#   prod_list_detections, prod_get_detection_details, etc.
+#
+# A "list_tenants" meta-tool is automatically added to discover all tenants.
+#
+# Environment variable overrides (useful for Docker / Kubernetes secrets):
+#   VECTRA_TENANT_<NAME_UPPER>_BASE_URL
+#   VECTRA_TENANT_<NAME_UPPER>_CLIENT_ID
+#   VECTRA_TENANT_<NAME_UPPER>_CLIENT_SECRET
+#   VECTRA_TENANT_<NAME_UPPER>_API_VERSION
+#   VECTRA_TENANT_<NAME_UPPER>_OAUTH_TOKEN_URL
+#   VECTRA_TENANT_<NAME_UPPER>_REQUEST_TIMEOUT
+#   VECTRA_TENANT_<NAME_UPPER>_RATE_LIMIT_REQUESTS
+#   VECTRA_TENANT_<NAME_UPPER>_RATE_LIMIT_PERIOD
+#   VECTRA_TENANT_<NAME_UPPER>_CACHE_TTL
+#
+# Example: VECTRA_TENANT_PROD_CLIENT_SECRET=<secret> overrides client_secret for "prod"
+#
+# To use this file:
+#   python server.py --config tenants.yaml
+#   # or set: VECTRA_CONFIG_FILE=tenants.yaml
+
+tenants:
+  - name: prod
+    base_url: https://prod-tenant.uw2.portal.vectra.ai
+    client_id: "<prod-client-id>"
+    client_secret: "<prod-client-secret>"
+    # Optional per-tenant overrides (defaults shown):
+    # api_version: v3.4
+    # request_timeout: 30
+    # rate_limit_requests: 100
+    # rate_limit_period: 60
+    # cache_ttl: 300
+
+  - name: staging
+    base_url: https://staging-tenant.uw2.portal.vectra.ai
+    client_id: "<staging-client-id>"
+    client_secret: "<staging-client-secret>"

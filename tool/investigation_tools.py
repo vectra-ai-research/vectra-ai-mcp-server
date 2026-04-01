@@ -5,30 +5,22 @@ from pydantic import Field
 import json
 
 from utils.validators import validate_date_range
+from tool.base import BaseMCPTools
 
-class InvestigationMCPTools:
+
+class InvestigationMCPTools(BaseMCPTools):
     """MCP tools for investigations."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all investigation tools with the MCP server."""
-        self.vectra_mcp.tool()(self.create_assignment)
-        self.vectra_mcp.tool()(self.list_assignments)
-        self.vectra_mcp.tool()(self.list_assignments_for_user)
-        self.vectra_mcp.tool()(self.delete_assignment)
-        self.vectra_mcp.tool()(self.get_assignment_detail_by_id)
-        self.vectra_mcp.tool()(self.get_assignment_for_entity)
-        self.vectra_mcp.tool()(self.create_entity_note)
-        self.vectra_mcp.tool()(self.mark_detection_fixed)
+        self._register_tool(self.create_assignment)
+        self._register_tool(self.list_assignments)
+        self._register_tool(self.list_assignments_for_user)
+        self._register_tool(self.delete_assignment)
+        self._register_tool(self.get_assignment_detail_by_id)
+        self._register_tool(self.get_assignment_for_entity)
+        self._register_tool(self.create_entity_note)
+        self._register_tool(self.mark_detection_fixed)
 
     async def list_assignments(
             self,

@@ -6,30 +6,22 @@ import json
 import base64
 
 from utils.validators import validate_date_range
+from tool.base import BaseMCPTools
 
-class DetectionMCPTools:
+
+class DetectionMCPTools(BaseMCPTools):
     """MCP tools for detection analysis and management."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all detection tools with the MCP server."""
-        self.vectra_mcp.tool()(self.list_detection_ids)
-        self.vectra_mcp.tool()(self.list_detections_with_basic_info)
-        self.vectra_mcp.tool()(self.list_detections_with_details)
-        self.vectra_mcp.tool()(self.list_entity_detections)
-        self.vectra_mcp.tool()(self.get_detection_count)
-        self.vectra_mcp.tool()(self.get_detection_details)
-        self.vectra_mcp.tool()(self.get_detection_summary)
-        self.vectra_mcp.tool()(self.get_detection_pcap)
+        self._register_tool(self.list_detection_ids)
+        self._register_tool(self.list_detections_with_basic_info)
+        self._register_tool(self.list_detections_with_details)
+        self._register_tool(self.list_entity_detections)
+        self._register_tool(self.get_detection_count)
+        self._register_tool(self.get_detection_details)
+        self._register_tool(self.get_detection_summary)
+        self._register_tool(self.get_detection_pcap)
     
     async def get_detection_details(
         self,
