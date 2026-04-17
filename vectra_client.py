@@ -883,9 +883,55 @@ class VectraClient:
         return await self._make_request("GET", "vectra-match/available-devices")
     
     # Vectra pcap endpoints
-    async def get_detection_pcap(self, detection_id) -> Dict[str, Any]:
-        """Get Vectra Match statistics."""
-        return await self._make_request("GET", f"detections/{detection_id}/pcap")
+    async def get_detection_pcap(self, detection_id: int) -> bytes:
+        """Download PCAP file for a specific detection.
+
+        Returns raw bytes so callers can base64-encode or save directly.
+        Raises VectraAPIError / VectraNotFoundError on failure.
+        """
+        await self.rate_limiter.acquire()
+        access_token = await self.token_manager.get_access_token()
+        url = urljoin(self.config.api_base_url + "/", f"detections/{detection_id}/pcap")
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "*/*",
+            "User-Agent": "VectraMCPServer/1.0.0",
+        }
+
+        self.logger.debug("Downloading PCAP for detection %s", detection_id)
+
+        try:
+            response = await self.client.request("GET", url, headers=headers)
+
+            if response.status_code == 404:
+                raise VectraNotFoundError(
+                    f"No PCAP available for detection {detection_id}",
+                    status_code=404,
+                )
+            if response.status_code == 406:
+                raise VectraNotFoundError(
+                    f"No PCAP data available for detection {detection_id}. "
+                    f"PCAPs are only generated for network-based detections "
+                    f"(not cloud/log-based detections such as M365, Azure AD, or AWS).",
+                    status_code=406,
+                )
+            if response.status_code == 401:
+                raise VectraAuthenticationError(
+                    "Authentication failed - check credentials", status_code=401
+                )
+            if not response.is_success:
+                raise VectraAPIError(
+                    f"PCAP download failed with status {response.status_code}",
+                    status_code=response.status_code,
+                )
+
+            return response.content
+
+        except (VectraAPIError, VectraAuthenticationError, VectraNotFoundError):
+            raise
+        except httpx.RequestError as e:
+            raise VectraAPIError(f"Request error downloading PCAP: {e}")
     
     # Vectra lockdown endpoints
     async def get_lockdown_entities(self) -> Dict[str, Any]:

@@ -5,23 +5,15 @@ from pydantic import Field
 import json
 
 from utils.validators import validate_date_range
+from tool.base import BaseMCPTools
 
-class ManagementMCPTools:
+
+class ManagementMCPTools(BaseMCPTools):
     """MCP tools for Vectra AI platform management."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all platform management tools with the MCP server."""
-        self.vectra_mcp.tool()(self.list_platform_users)
+        self._register_tool(self.list_platform_users)
 
     async def list_platform_users(
         self,
@@ -85,7 +77,7 @@ class ManagementMCPTools:
             user_count = len(user_list)
 
             # Return formatted JSON response
-            return json.dumps({"uer_couclnt": user_count, "user_list": user_list}, indent=2)
+            return json.dumps({"user_count": user_count, "user_list": user_list}, indent=2)
             
         except Exception as e:
             raise Exception(f"Failed to list users : {str(e)}")

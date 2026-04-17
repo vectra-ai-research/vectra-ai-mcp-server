@@ -6,30 +6,22 @@ import json
 import base64
 
 from utils.validators import validate_date_range
+from tool.base import BaseMCPTools
 
-class DetectionMCPTools:
+
+class DetectionMCPTools(BaseMCPTools):
     """MCP tools for detection analysis and management."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all detection tools with the MCP server."""
-        self.vectra_mcp.tool()(self.list_detection_ids)
-        self.vectra_mcp.tool()(self.list_detections_with_basic_info)
-        self.vectra_mcp.tool()(self.list_detections_with_details)
-        self.vectra_mcp.tool()(self.list_entity_detections)
-        self.vectra_mcp.tool()(self.get_detection_count)
-        self.vectra_mcp.tool()(self.get_detection_details)
-        self.vectra_mcp.tool()(self.get_detection_summary)
-        self.vectra_mcp.tool()(self.get_detection_pcap)
+        self._register_tool(self.list_detection_ids)
+        self._register_tool(self.list_detections_with_basic_info)
+        self._register_tool(self.list_detections_with_details)
+        self._register_tool(self.list_entity_detections)
+        self._register_tool(self.get_detection_count)
+        self._register_tool(self.get_detection_details)
+        self._register_tool(self.get_detection_summary)
+        self._register_tool(self.get_detection_pcap)
     
     async def get_detection_details(
         self,
@@ -177,10 +169,16 @@ class DetectionMCPTools:
             str: Count of detections matching the criteria.
         """
         params = locals().copy()
-        exclude_params = {'self', 'start_date', 'end_date'}
+        exclude_params = {'self', 'start_date', 'end_date', 'detection_name'}
 
         search_params = {k: v for k, v in params.items()
                    if v is not None and k not in exclude_params}
+
+        if detection_name:
+            search_params['detection_type'] = detection_name
+
+        # Only fetch 1 result since we just need the count from the response
+        search_params['page_size'] = 1
 
         # Add date filters if provided
         start_date, end_date = validate_date_range(start_date, end_date)
@@ -211,13 +209,12 @@ class DetectionMCPTools:
             Exception: If retrieval fails.
         """
         try:
-            pcap_data = await self.client.get_detection_pcap(detection_id)
+            pcap_bytes = await self.client.get_detection_pcap(detection_id)
 
-            if not pcap_data:
+            if not pcap_bytes:
                 return f"No pcap data found for detection ID {detection_id}."
-            
-            # Encode binary content as base64
-            encoded_content = base64.b64encode(pcap_data).decode('utf-8')
+
+            encoded_content = base64.b64encode(pcap_bytes).decode('utf-8')
 
             return f"PCAP data for detection ID {detection_id}:\n{encoded_content}"
 
@@ -337,15 +334,14 @@ class DetectionMCPTools:
                 for dets in detections
             ]
 
+        if limit and len(detection_list) > limit:
+            detection_list = detection_list[:limit]
+
         response = {"detection_count": total_count, "detections": detection_list}
-        
-        if limit:
-            if total_count > limit:
-            # Limit the number of detections returned to reduce response size
-                detections = detections[:limit]
-                response["note"] = f"Results limited to {limit} detections. Total detections found: {total_count}."
-                response["detections"] = detection_list
-            
+
+        if limit and total_count > limit:
+            response["note"] = f"Results limited to {limit} detections. Total detections found: {total_count}."
+
         return json.dumps(response, indent=2)
     
     async def get_detection_summary(

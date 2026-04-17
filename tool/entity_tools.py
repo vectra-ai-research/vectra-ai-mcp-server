@@ -4,26 +4,19 @@ from typing import Literal, Annotated
 from pydantic import Field, IPvAnyAddress
 import json
 
-class EntityMCPTools:
+from tool.base import BaseMCPTools
+
+
+class EntityMCPTools(BaseMCPTools):
     """MCP tools for entity (host or account) analysis and management."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all entity tools with the MCP server."""
-        self.vectra_mcp.tool()(self.list_entities)
-        self.vectra_mcp.tool()(self.lookup_entity_info_by_name)
-        self.vectra_mcp.tool()(self.lookup_host_by_ip)
-        self.vectra_mcp.tool()(self.get_host_details)
-        self.vectra_mcp.tool()(self.get_account_details)
+        self._register_tool(self.list_entities)
+        self._register_tool(self.lookup_entity_info_by_name)
+        self._register_tool(self.lookup_host_by_ip)
+        self._register_tool(self.get_host_details)
+        self._register_tool(self.get_account_details)
     
     async def list_entities(
         self,

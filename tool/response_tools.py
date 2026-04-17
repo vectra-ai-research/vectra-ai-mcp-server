@@ -2,22 +2,15 @@
 
 import json
 
-class ResponseMCPTools:
+from tool.base import BaseMCPTools
+
+
+class ResponseMCPTools(BaseMCPTools):
     """MCP tools for response actions."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
-        Args:
-            vectra_mcp: FastMCP server instance
-            client: VectraClient instance
-        """
-        self.vectra_mcp = vectra_mcp
-        self.client = client
-    
+
     def register_tools(self):
         """Register all response tools with the MCP server."""
-        self.vectra_mcp.tool()(self.list_lockdown_entities)
+        self._register_tool(self.list_lockdown_entities)
 
     async def list_lockdown_entities(
         self,

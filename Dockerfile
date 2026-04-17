@@ -21,6 +21,9 @@ COPY tool/ ./tool/
 COPY utils/ ./utils/
 COPY prompt/ ./prompt/
 
+# Copy tenants YAML config if present (optional for multi-tenant mode)
+COPY tenants.yaml* ./
+
 # Install uv via pip and sync dependencies
 RUN pip install --no-cache-dir uv && \
     uv sync --frozen

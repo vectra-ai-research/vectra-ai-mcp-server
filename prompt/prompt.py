@@ -1,28 +1,36 @@
 from typing import Optional, Literal, List, Dict, Any
 from pydantic import Field
 
+
 class VectraMCPPrompts:
     """Vectra AI MCP prompts for threat analysis and investigations."""
-    
-    def __init__(self, vectra_mcp, client):
-        """Initialize with FastMCP instance and Vectra client.
-        
+
+    def __init__(self, vectra_mcp, client, prefix: Optional[str] = None, tenant_label: Optional[str] = None):
+        """Initialize with FastMCP instance, Vectra client, and optional tenant prefix.
+
         Args:
             vectra_mcp: FastMCP server instance
             client: VectraClient instance
+            prefix: Prompt name prefix for multi-tenant mode (e.g., "prod")
+            tenant_label: Human-readable tenant label for descriptions
         """
         self.vectra_mcp = vectra_mcp
         self.client = client
-    
+        self.prefix = prefix
+        self.tenant_label = tenant_label
+
     def register_prompts(self):
         """Register all prompts with the MCP server."""
+        label = f"[{self.tenant_label or self.prefix}] " if self.prefix else ""
+        name_prefix = f"{self.prefix} " if self.prefix else ""
+
         self.vectra_mcp.prompt(
-            name = "Summarize Detection",
-            description = "Get a detailed summary of a specific detection in Vectra AI platform."
+            name=f"{name_prefix}Summarize Detection",
+            description=f"{label}Get a detailed summary of a specific detection in Vectra AI platform."
         )(self.summarize_detection)
         self.vectra_mcp.prompt(
-            name = "Visualize Entity Detections",
-            description = "Visualize realtionship of detections related to a specific entity in Vectra AI platform with a interactive graph."
+            name=f"{name_prefix}Visualize Entity Detections",
+            description=f"{label}Visualize realtionship of detections related to a specific entity in Vectra AI platform with a interactive graph."
         )(self.visualize_entity_detections)
 
     async def summarize_detection(
