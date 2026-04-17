@@ -77,7 +77,7 @@ class ManagementMCPTools(BaseMCPTools):
             user_count = len(user_list)
 
             # Return formatted JSON response
-            return json.dumps({"uer_couclnt": user_count, "user_list": user_list}, indent=2)
+            return json.dumps({"user_count": user_count, "user_list": user_list}, indent=2)
             
         except Exception as e:
             raise Exception(f"Failed to list users : {str(e)}")
