@@ -873,7 +873,7 @@ class VectraClient:
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Accept": "application/octet-stream",
+            "Accept": "*/*",
             "User-Agent": "VectraMCPServer/1.0.0",
         }
 
@@ -886,6 +886,13 @@ class VectraClient:
                 raise VectraNotFoundError(
                     f"No PCAP available for detection {detection_id}",
                     status_code=404,
+                )
+            if response.status_code == 406:
+                raise VectraNotFoundError(
+                    f"No PCAP data available for detection {detection_id}. "
+                    f"PCAPs are only generated for network-based detections "
+                    f"(not cloud/log-based detections such as M365, Azure AD, or AWS).",
+                    status_code=406,
                 )
             if response.status_code == 401:
                 raise VectraAuthenticationError(

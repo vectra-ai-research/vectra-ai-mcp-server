@@ -74,7 +74,7 @@ class InvestigationMCPTools(BaseMCPTools):
         """
         try:
             assignments = await self.client.get_assignments(
-                assignee = user_id,
+                assignees = user_id,
                 resolved = resolved
                 )
             if assignments is None:
@@ -184,7 +184,7 @@ class InvestigationMCPTools(BaseMCPTools):
 
         try:
             # Create the assignment
-            assignment = await self.client.delete_assignment(assignment_data)
+            assignment = await self.client.create_assignment(assignment_data)
             assignment_id = assignment.get("assignment").get("id")
             
             # Return assignment details
