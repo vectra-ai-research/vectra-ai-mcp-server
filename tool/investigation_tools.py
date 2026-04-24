@@ -1,11 +1,19 @@
 """MCP tools for security investigations."""
 
+import asyncio
 from typing import Literal, List, Annotated
 from pydantic import Field
 import json
 
+from utils.logging import get_logger
 from utils.validators import validate_date_range
 from tool.base import BaseMCPTools
+
+logger = get_logger(__name__)
+
+# Hard timeout for investigation API calls (seconds).
+# Prevents a slow/hanging Vectra API from blocking the entire MCP server.
+_INVESTIGATION_TIMEOUT = 20
 
 
 class InvestigationMCPTools(BaseMCPTools):
@@ -320,9 +328,15 @@ class InvestigationMCPTools(BaseMCPTools):
 
         from vectra_client import VectraAPIError
 
+        logger.info("run_investigation: submitting query: %s", query)
+
         try:
-            submission = await self.client.create_investigation(query)
+            submission = await asyncio.wait_for(
+                self.client.create_investigation(query),
+                timeout=_INVESTIGATION_TIMEOUT,
+            )
             request_id = submission.get("requestId") or submission.get("request_id")
+            logger.info("run_investigation: query submitted, request_id=%s", request_id)
             return json.dumps({
                 "request_id": request_id,
                 "query": query,
@@ -330,7 +344,14 @@ class InvestigationMCPTools(BaseMCPTools):
                 "status": "submitted",
                 "next_step": "Call get_investigation_results with this request_id to fetch results. The query may take a few seconds to complete.",
             }, indent=2)
+        except asyncio.TimeoutError:
+            logger.error("run_investigation: API call timed out after %ds for query: %s", _INVESTIGATION_TIMEOUT, query)
+            return json.dumps({
+                "error": f"Investigation API timed out after {_INVESTIGATION_TIMEOUT}s. The Vectra API may be slow or unreachable. Try again.",
+                "query": query,
+            }, indent=2)
         except VectraAPIError as e:
+            logger.error("run_investigation: API error status_code=%s error=%s", e.status_code, str(e))
             return json.dumps({
                 "error": str(e),
                 "query": query,
@@ -338,6 +359,7 @@ class InvestigationMCPTools(BaseMCPTools):
                 "api_response": e.response_data,
             }, indent=2)
         except Exception as e:
+            logger.error("run_investigation: unexpected error: %s", str(e), exc_info=True)
             return json.dumps({
                 "error": f"Failed to submit investigation query: {str(e)}",
                 "query": query,
@@ -366,17 +388,24 @@ class InvestigationMCPTools(BaseMCPTools):
         """
         from vectra_client import VectraAPIError
 
+        logger.info("get_investigation_results: fetching request_id=%s page=%d page_size=%d", request_id, page, page_size)
+
         try:
-            result = await self.client.get_investigation_results(
-                request_id,
-                page=page,
-                page_size=page_size,
+            result = await asyncio.wait_for(
+                self.client.get_investigation_results(
+                    request_id,
+                    page=page,
+                    page_size=page_size,
+                ),
+                timeout=_INVESTIGATION_TIMEOUT,
             )
 
             status = result.get("status")
             query_status = result.get("meta", {}).get("query_status")
+            logger.info("get_investigation_results: request_id=%s status=%s query_status=%s", request_id, status, query_status)
 
             if status == "failed":
+                logger.warning("get_investigation_results: query failed request_id=%s error=%s", request_id, result.get("error"))
                 return json.dumps({
                     "error": "Investigation query failed",
                     "request_id": request_id,
@@ -386,16 +415,27 @@ class InvestigationMCPTools(BaseMCPTools):
                 }, indent=2)
 
             if query_status in ("RUNNING", "PENDING") or status in ("pending", "processing"):
+                rows = result.get("meta", {}).get("num_rows_available", 0)
+                logger.info("get_investigation_results: still running request_id=%s rows_available=%s", request_id, rows)
                 return json.dumps({
                     "request_id": request_id,
                     "status": query_status or status,
                     "message": "Query is still running. Call get_investigation_results again in a few seconds.",
-                    "rows_available": result.get("meta", {}).get("num_rows_available", 0),
+                    "rows_available": rows,
                 }, indent=2)
 
+            row_count = result.get("meta", {}).get("num_rows_available") or result.get("results", {}).get("row_count", "?")
+            logger.info("get_investigation_results: completed request_id=%s rows=%s", request_id, row_count)
             return json.dumps(result, indent=2)
 
+        except asyncio.TimeoutError:
+            logger.error("get_investigation_results: API call timed out after %ds for request_id=%s", _INVESTIGATION_TIMEOUT, request_id)
+            return json.dumps({
+                "error": f"Investigation API timed out after {_INVESTIGATION_TIMEOUT}s. The Vectra API may be slow or unreachable. Try again.",
+                "request_id": request_id,
+            }, indent=2)
         except VectraAPIError as e:
+            logger.error("get_investigation_results: API error request_id=%s status_code=%s error=%s", request_id, e.status_code, str(e))
             return json.dumps({
                 "error": str(e),
                 "request_id": request_id,
@@ -403,6 +443,7 @@ class InvestigationMCPTools(BaseMCPTools):
                 "api_response": e.response_data,
             }, indent=2)
         except Exception as e:
+            logger.error("get_investigation_results: unexpected error request_id=%s: %s", request_id, str(e), exc_info=True)
             return json.dumps({
                 "error": f"Failed to fetch investigation results: {str(e)}",
                 "request_id": request_id,
