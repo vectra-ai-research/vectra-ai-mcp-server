@@ -1,6 +1,5 @@
 """MCP tools for security investigations."""
 
-import asyncio
 from typing import Literal, List, Annotated
 from pydantic import Field
 import json
@@ -23,6 +22,7 @@ class InvestigationMCPTools(BaseMCPTools):
         self._register_tool(self.create_entity_note)
         self._register_tool(self.mark_detection_fixed)
         self._register_tool(self.run_investigation)
+        self._register_tool(self.get_investigation_results)
 
     async def list_assignments(
             self,
@@ -304,18 +304,12 @@ class InvestigationMCPTools(BaseMCPTools):
                 "the exact column names available for your query."
             ))
         ],
-        page_size: Annotated[
-            int,
-            Field(description="Number of rows per page in the result set.", ge=1, le=5000)
-        ] = 100,
     ) -> str:
         """
-        Run an investigation SQL query against Vectra security telemetry data and return the results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first to learn the valid SQL syntax and available columns. The query MUST be a single line (no newlines), MUST use single quotes only (no double quotes), and MUST NOT contain escaped quotes.
+        Submit an investigation SQL query and return the request_id. This tool returns immediately — the query runs asynchronously. Use get_investigation_results with the returned request_id to fetch results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first. The query MUST be a single line (no newlines), MUST use single quotes only (no double quotes), and MUST NOT contain escaped quotes.
 
         Returns:
-            str: JSON string with the query results including columns and data rows.
-        Raises:
-            Exception: If the investigation query fails.
+            str: JSON with request_id and searchable_range. Use request_id with get_investigation_results.
         """
         # Sanitize: collapse newlines to spaces, strip double quotes from
         # column aliases (replace with single quotes or remove), and remove
@@ -326,82 +320,90 @@ class InvestigationMCPTools(BaseMCPTools):
 
         from vectra_client import VectraAPIError
 
-        request_id = None
         try:
-            # Submit the query
             submission = await self.client.create_investigation(query)
             request_id = submission.get("requestId") or submission.get("request_id")
-            if not request_id:
-                return json.dumps({
-                    "error": "No request_id returned from the API",
-                    "query": query,
-                    "api_response": submission,
-                }, indent=2)
-
-            # Poll for results with exponential backoff
-            max_attempts = 30
-            delay = 1.0
-            last_status = None
-            last_result = None
-            for attempt in range(max_attempts):
-                result = await self.client.get_investigation_results(
-                    request_id,
-                    page=1,
-                    page_size=page_size,
-                )
-                last_result = result
-
-                # Check if the query is done
-                status = result.get("status")
-                query_status = result.get("meta", {}).get("query_status")
-                last_status = status or query_status
-
-                if status == "completed":
-                    return json.dumps(result, indent=2)
-
-                if status == "failed":
-                    return json.dumps({
-                        "error": "Investigation query failed",
-                        "request_id": request_id,
-                        "query": query,
-                        "status": status,
-                        "error_details": result.get("error"),
-                        "api_response": result,
-                    }, indent=2)
-
-                # Still running — check via meta field (202 response shape)
-                if query_status in ("RUNNING", "PENDING") or status in ("pending", "processing"):
-                    await asyncio.sleep(delay)
-                    delay = min(delay * 1.5, 10.0)
-                    continue
-
-                # If we got data back without an explicit status, return it
-                if result.get("results") or result.get("data"):
-                    return json.dumps(result, indent=2)
-
-                await asyncio.sleep(delay)
-                delay = min(delay * 1.5, 10.0)
-
             return json.dumps({
-                "error": "Investigation query timed out after polling",
                 "request_id": request_id,
                 "query": query,
-                "last_status": last_status,
-                "attempts": max_attempts,
-                "last_api_response": last_result,
+                "searchable_range": submission.get("searchable_range") or submission.get("searchableRange"),
+                "status": "submitted",
+                "next_step": "Call get_investigation_results with this request_id to fetch results. The query may take a few seconds to complete.",
             }, indent=2)
-
         except VectraAPIError as e:
             return json.dumps({
                 "error": str(e),
-                "request_id": request_id,
                 "query": query,
                 "status_code": e.status_code,
                 "api_response": e.response_data,
             }, indent=2)
         except Exception as e:
             return json.dumps({
-                "error": f"Failed to run investigation query: {str(e)}",
-                "request_id": request_id,
+                "error": f"Failed to submit investigation query: {str(e)}",
                 "query": query,
+            }, indent=2)
+
+    async def get_investigation_results(
+        self,
+        request_id: Annotated[
+            str,
+            Field(description="The request_id returned by run_investigation.")
+        ],
+        page: Annotated[
+            int,
+            Field(description="Page number (1-indexed).", ge=1)
+        ] = 1,
+        page_size: Annotated[
+            int,
+            Field(description="Number of rows per page.", ge=1, le=5000)
+        ] = 100,
+    ) -> str:
+        """
+        Fetch results for a previously submitted investigation query. If the query is still running, the response will indicate the status — call this tool again after a few seconds. Use the request_id returned by run_investigation.
+
+        Returns:
+            str: JSON with query status and results. If status is RUNNING or PENDING, call again after a few seconds.
+        """
+        from vectra_client import VectraAPIError
+
+        try:
+            result = await self.client.get_investigation_results(
+                request_id,
+                page=page,
+                page_size=page_size,
+            )
+
+            status = result.get("status")
+            query_status = result.get("meta", {}).get("query_status")
+
+            if status == "failed":
+                return json.dumps({
+                    "error": "Investigation query failed",
+                    "request_id": request_id,
+                    "status": status,
+                    "error_details": result.get("error"),
+                    "api_response": result,
+                }, indent=2)
+
+            if query_status in ("RUNNING", "PENDING") or status in ("pending", "processing"):
+                return json.dumps({
+                    "request_id": request_id,
+                    "status": query_status or status,
+                    "message": "Query is still running. Call get_investigation_results again in a few seconds.",
+                    "rows_available": result.get("meta", {}).get("num_rows_available", 0),
+                }, indent=2)
+
+            return json.dumps(result, indent=2)
+
+        except VectraAPIError as e:
+            return json.dumps({
+                "error": str(e),
+                "request_id": request_id,
+                "status_code": e.status_code,
+                "api_response": e.response_data,
+            }, indent=2)
+        except Exception as e:
+            return json.dumps({
+                "error": f"Failed to fetch investigation results: {str(e)}",
+                "request_id": request_id,
             }, indent=2)
