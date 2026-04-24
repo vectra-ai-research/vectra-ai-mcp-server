@@ -1,5 +1,6 @@
 """MCP tools for security investigations."""
 
+import asyncio
 from typing import Literal, List, Annotated
 from pydantic import Field
 import json
@@ -21,6 +22,7 @@ class InvestigationMCPTools(BaseMCPTools):
         self._register_tool(self.get_assignment_for_entity)
         self._register_tool(self.create_entity_note)
         self._register_tool(self.mark_detection_fixed)
+        self._register_tool(self.run_investigation)
 
     async def list_assignments(
             self,
@@ -267,7 +269,7 @@ class InvestigationMCPTools(BaseMCPTools):
         assignment_id: Annotated[
             int,
             Field(ge=1, description="ID of the assignment to delete")
-        ]    
+        ]
     ) -> str:
         """
         Unassign or delete an investigation assignment by its ID. Use list_assignments and list_assignments_for_user to fetch assignment IDs.
@@ -282,3 +284,91 @@ class InvestigationMCPTools(BaseMCPTools):
             return f"Assignment {assignment_id} deleted successfully."
         except Exception as e:
             raise Exception(f"Failed to delete assignment {assignment_id}: {str(e)}")
+
+    async def run_investigation(
+        self,
+        query: Annotated[
+            str,
+            Field(description=(
+                "SQL query in the Vectra Trino-like dialect. "
+                "Must be a SELECT statement with a LIMIT clause and a timestamp filter. "
+                "CRITICAL FORMATTING RULES: "
+                "1) The query MUST be a single line with NO line breaks (no \\n, no newlines). "
+                "2) NEVER use double quotes anywhere in the query. Use single quotes for "
+                "string literals AND for column aliases (e.g. AS 'failure_count' not AS \"failure_count\"). "
+                "3) NEVER use escaped quotes (no \\\" or \\\\'). "
+                "Example: SELECT id.orig_h, count(*) AS 'failure_count' FROM network.kerberos._all WHERE timestamp BETWEEN date_add('day', -7, now()) AND now() GROUP BY id.orig_h ORDER BY 'failure_count' DESC LIMIT 100 "
+                "IMPORTANT: Before calling this tool, you MUST first call "
+                "get_investigation_sql_reference to learn the supported SQL syntax, "
+                "and get_investigation_schema with the relevant data_source to learn "
+                "the exact column names available for your query."
+            ))
+        ],
+        page_size: Annotated[
+            int,
+            Field(description="Number of rows per page in the result set.", ge=1, le=5000)
+        ] = 100,
+    ) -> str:
+        """
+        Run an investigation SQL query against Vectra security telemetry data and return the results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first to learn the valid SQL syntax and available columns. The query MUST be a single line (no newlines), MUST use single quotes only (no double quotes), and MUST NOT contain escaped quotes.
+
+        Returns:
+            str: JSON string with the query results including columns and data rows.
+        Raises:
+            Exception: If the investigation query fails.
+        """
+        # Sanitize: collapse newlines to spaces, strip double quotes from
+        # column aliases (replace with single quotes or remove), and remove
+        # any backslash-escaped quotes the LLM may have introduced.
+        query = " ".join(query.split())
+        query = query.replace('\\"', '"').replace("\\'", "'")
+        query = query.replace('"', "'")
+
+        try:
+            # Submit the query
+            submission = await self.client.create_investigation(query)
+            request_id = submission.get("requestId") or submission.get("request_id")
+            if not request_id:
+                return json.dumps({"error": "No requestId returned", "response": submission}, indent=2)
+
+            # Poll for results with exponential backoff
+            max_attempts = 30
+            delay = 1.0
+            for attempt in range(max_attempts):
+                result = await self.client.get_investigation_results(
+                    request_id,
+                    page=1,
+                    page_size=page_size,
+                )
+
+                # Check if the query is done
+                status = result.get("status")
+                query_status = result.get("meta", {}).get("query_status")
+
+                if status == "completed":
+                    return json.dumps(result, indent=2)
+
+                if status == "failed":
+                    return json.dumps({"error": "Investigation query failed", "details": result}, indent=2)
+
+                # Still running — check via meta field (202 response shape)
+                if query_status in ("RUNNING", "PENDING") or status in ("pending", "processing"):
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 1.5, 10.0)
+                    continue
+
+                # If we got data back without an explicit status, return it
+                if result.get("results") or result.get("data"):
+                    return json.dumps(result, indent=2)
+
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, 10.0)
+
+            return json.dumps({
+                "error": "Investigation query timed out after polling",
+                "request_id": request_id,
+                "last_status": status or query_status,
+            }, indent=2)
+
+        except Exception as e:
+            raise Exception(f"Failed to run investigation query: {str(e)}")
