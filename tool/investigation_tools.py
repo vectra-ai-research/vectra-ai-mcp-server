@@ -324,32 +324,50 @@ class InvestigationMCPTools(BaseMCPTools):
         query = query.replace('\\"', '"').replace("\\'", "'")
         query = query.replace('"', "'")
 
+        from vectra_client import VectraAPIError
+
+        request_id = None
         try:
             # Submit the query
             submission = await self.client.create_investigation(query)
             request_id = submission.get("requestId") or submission.get("request_id")
             if not request_id:
-                return json.dumps({"error": "No requestId returned", "response": submission}, indent=2)
+                return json.dumps({
+                    "error": "No request_id returned from the API",
+                    "query": query,
+                    "api_response": submission,
+                }, indent=2)
 
             # Poll for results with exponential backoff
             max_attempts = 30
             delay = 1.0
+            last_status = None
+            last_result = None
             for attempt in range(max_attempts):
                 result = await self.client.get_investigation_results(
                     request_id,
                     page=1,
                     page_size=page_size,
                 )
+                last_result = result
 
                 # Check if the query is done
                 status = result.get("status")
                 query_status = result.get("meta", {}).get("query_status")
+                last_status = status or query_status
 
                 if status == "completed":
                     return json.dumps(result, indent=2)
 
                 if status == "failed":
-                    return json.dumps({"error": "Investigation query failed", "details": result}, indent=2)
+                    return json.dumps({
+                        "error": "Investigation query failed",
+                        "request_id": request_id,
+                        "query": query,
+                        "status": status,
+                        "error_details": result.get("error"),
+                        "api_response": result,
+                    }, indent=2)
 
                 # Still running — check via meta field (202 response shape)
                 if query_status in ("RUNNING", "PENDING") or status in ("pending", "processing"):
@@ -367,8 +385,23 @@ class InvestigationMCPTools(BaseMCPTools):
             return json.dumps({
                 "error": "Investigation query timed out after polling",
                 "request_id": request_id,
-                "last_status": status or query_status,
+                "query": query,
+                "last_status": last_status,
+                "attempts": max_attempts,
+                "last_api_response": last_result,
             }, indent=2)
 
+        except VectraAPIError as e:
+            return json.dumps({
+                "error": str(e),
+                "request_id": request_id,
+                "query": query,
+                "status_code": e.status_code,
+                "api_response": e.response_data,
+            }, indent=2)
         except Exception as e:
-            raise Exception(f"Failed to run investigation query: {str(e)}")
+            return json.dumps({
+                "error": f"Failed to run investigation query: {str(e)}",
+                "request_id": request_id,
+                "query": query,
+            }, indent=2)
