@@ -4,7 +4,7 @@ from typing import Literal, Annotated
 from pydantic import Field, IPvAnyAddress
 import json
 
-from tool.base import BaseMCPTools
+from .base import BaseMCPTools
 
 
 class EntityMCPTools(BaseMCPTools):
