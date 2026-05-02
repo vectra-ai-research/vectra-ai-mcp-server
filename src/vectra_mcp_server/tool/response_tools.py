@@ -2,7 +2,7 @@
 
 import json
 
-from tool.base import BaseMCPTools
+from .base import BaseMCPTools
 
 
 class ResponseMCPTools(BaseMCPTools):
