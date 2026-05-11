@@ -938,6 +938,50 @@ class VectraClient:
         """Get Vectra Match statistics."""
         return await self._make_request("GET", f"lockdown")
 
+    # Investigation endpoints
+    async def create_investigation(self, query: str, version: str = "1.0") -> Dict[str, Any]:
+        """Submit an investigation SQL query.
+
+        Args:
+            query: SQL query string in the supported Trino-like dialect.
+            version: Query language version (default "1.0").
+
+        Returns:
+            Dict containing requestId and searchableRange.
+        """
+        return await self._make_request(
+            "POST",
+            "investigations",
+            json_data={"query": query, "version": version},
+        )
+
+    async def get_investigation_results(
+        self,
+        request_id: str,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Poll for investigation query results.
+
+        Args:
+            request_id: UUID returned by create_investigation.
+            page: Page number (1-indexed).
+            page_size: Number of results per page.
+
+        Returns:
+            Dict with status, results (columns + data), pagination, etc.
+        """
+        params = {k: v for k, v in {
+            "page": page,
+            "page_size": page_size,
+        }.items() if v is not None}
+
+        return await self._make_request(
+            "GET",
+            f"investigations/{request_id}",
+            params=params,
+        )
+
     # Search functionality
     async def search_by_name(self, name: str, entity_type: Optional[str] = None) -> Dict[str, Any]:
         """Search entities by name."""

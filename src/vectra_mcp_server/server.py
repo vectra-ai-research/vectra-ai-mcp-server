@@ -21,6 +21,7 @@ from .tool.investigation_tools import InvestigationMCPTools
 from .tool.management_tools import ManagementMCPTools
 from .tool.response_tools import ResponseMCPTools
 from .prompt.prompt import VectraMCPPrompts
+from .resources.investigation_resources import InvestigationResourceTools
 
 logger = get_logger(__name__)
 
@@ -113,6 +114,7 @@ class VectraMCPServer:
         InvestigationMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
         ManagementMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
         ResponseMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
+        InvestigationResourceTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
         VectraMCPPrompts(self.server, client, prefix=prefix, tenant_label=tenant_label).register_prompts()
 
     def _register_list_tenants_tool(self):
