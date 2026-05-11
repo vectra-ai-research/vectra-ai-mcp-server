@@ -1,6 +1,6 @@
 [project]
 name = "vectra-ai-mcp-server"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server for the Vectra AI Platform - exposes detection, investigation, and response tools to AI assistants."
 readme = "README.md"
 requires-python = ">=3.12"
