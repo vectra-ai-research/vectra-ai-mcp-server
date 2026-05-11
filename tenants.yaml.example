@@ -20,7 +20,8 @@
 # Example: VECTRA_TENANT_PROD_CLIENT_SECRET=<secret> overrides client_secret for "prod"
 #
 # To use this file:
-#   python server.py --config tenants.yaml
+#   vectra-ai-mcp-server --config tenants.yaml
+#   uvx vectra-ai-mcp-server --config /absolute/path/to/tenants.yaml
 #   # or set: VECTRA_CONFIG_FILE=tenants.yaml
 
 tenants:

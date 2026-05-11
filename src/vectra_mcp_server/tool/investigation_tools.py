@@ -5,9 +5,9 @@ from typing import Literal, List, Annotated
 from pydantic import Field
 import json
 
-from utils.logging import get_logger
-from utils.validators import validate_date_range
-from tool.base import BaseMCPTools
+from ..utils.logging import get_logger
+from ..utils.validators import validate_date_range
+from .base import BaseMCPTools
 
 logger = get_logger(__name__)
 
@@ -326,7 +326,7 @@ class InvestigationMCPTools(BaseMCPTools):
         query = query.replace('\\"', '"').replace("\\'", "'")
         query = query.replace('"', "'")
 
-        from vectra_client import VectraAPIError
+        from ..vectra_client import VectraAPIError
 
         logger.info("run_investigation: submitting query: %s", query)
 
@@ -386,7 +386,7 @@ class InvestigationMCPTools(BaseMCPTools):
         Returns:
             str: JSON with query status and results. If status is RUNNING or PENDING, call again after a few seconds.
         """
-        from vectra_client import VectraAPIError
+        from ..vectra_client import VectraAPIError
 
         logger.info("get_investigation_results: fetching request_id=%s page=%d page_size=%d", request_id, page, page_size)
 

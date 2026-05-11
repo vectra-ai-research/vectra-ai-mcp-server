@@ -4,8 +4,8 @@ from typing import Literal, Annotated
 from pydantic import Field
 import json
 
-from utils.validators import validate_date_range
-from tool.base import BaseMCPTools
+from ..utils.validators import validate_date_range
+from .base import BaseMCPTools
 
 
 class ManagementMCPTools(BaseMCPTools):

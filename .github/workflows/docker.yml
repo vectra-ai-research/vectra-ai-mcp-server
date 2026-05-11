@@ -82,11 +82,16 @@ jobs:
                            -e VECTRA_CLIENT_SECRET=test \
                            --entrypoint="" "$IMAGE_TAG" python --version
           
-          # Test that the server script exists and can be imported
+          # Test that the package can be imported and the console script is on PATH
           docker run --rm -e VECTRA_BASE_URL=https://test.example.com \
                            -e VECTRA_CLIENT_ID=test \
                            -e VECTRA_CLIENT_SECRET=test \
-                           --entrypoint="" "$IMAGE_TAG" python -c "import server; print('Server module imported successfully')"
+                           --entrypoint="" "$IMAGE_TAG" python -c "import vectra_mcp_server; print('Package imported, version:', vectra_mcp_server.__version__)"
+
+          docker run --rm -e VECTRA_BASE_URL=https://test.example.com \
+                           -e VECTRA_CLIENT_ID=test \
+                           -e VECTRA_CLIENT_SECRET=test \
+                           --entrypoint="" "$IMAGE_TAG" vectra-ai-mcp-server --help
 
   security-scan:
     runs-on: ubuntu-latest

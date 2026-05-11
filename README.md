@@ -17,7 +17,93 @@ An MCP server that connects AI assistants to your Vectra AI security platform, e
 * Dynamically build advanced visulizations for analysis
 * Generate investigation reports from natural language
 
-# Setup - Host Locally
+# Setup - uvx (Recommended for End Users)
+
+[`uvx`](https://docs.astral.sh/uv/guides/tools/) (part of [uv](https://docs.astral.sh/uv/)) runs the published package in an isolated, ephemeral environment — no clone, no virtualenv, no Docker required. This is the easiest way to use the server when you just want to plug it into Claude Desktop, Cursor, VS Code, or any other MCP client.
+
+## Prerequisites
+- **uv** installed:
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  # Windows
+  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+  # Or via pip
+  pip install uv
+  ```
+- Python 3.12+ is fetched automatically by `uvx` if it's not on your system.
+
+## Quick check
+Once `uv` is installed, verify everything works without installing anything permanently:
+```bash
+# Once published to PyPI:
+uvx vectra-ai-mcp-server --help
+
+# Until then (or to track the latest main branch):
+uvx --from git+https://github.com/vectra-ai-research/vectra-ai-mcp-server vectra-ai-mcp-server --help
+```
+
+## MCP client configuration (single tenant)
+
+Pass credentials via the `env` block of your MCP client config — `uvx` does not load `.env` for you.
+
+```json
+{
+  "mcpServers": {
+    "vectra-ai-mcp": {
+      "command": "uvx",
+      "args": ["vectra-ai-mcp-server"],
+      "env": {
+        "VECTRA_BASE_URL": "https://123456789.ab1.portal.vectra.ai",
+        "VECTRA_CLIENT_ID": "<your-client-id>",
+        "VECTRA_CLIENT_SECRET": "<your-client-secret>"
+      }
+    }
+  }
+}
+```
+
+Pin a specific version with `uvx vectra-ai-mcp-server@0.2.0` (recommended for production setups).
+
+## MCP client configuration (multi-tenant)
+
+Provide an absolute path to a `tenants.yaml` file you've placed somewhere on disk (e.g. `~/.config/vectra/tenants.yaml`):
+
+```json
+{
+  "mcpServers": {
+    "vectra-ai-mcp": {
+      "command": "uvx",
+      "args": [
+        "vectra-ai-mcp-server",
+        "--config",
+        "/absolute/path/to/tenants.yaml"
+      ],
+      "env": {
+        "VECTRA_TENANT_PROD_CLIENT_SECRET": "...",
+        "VECTRA_TENANT_STAGING_CLIENT_SECRET": "..."
+      }
+    }
+  }
+}
+```
+
+See [`tenants.yaml.example`](tenants.yaml.example) for the file format. Per-tenant secrets can be injected via `VECTRA_TENANT_<NAME>_<FIELD>` env vars instead of being written into the YAML file.
+
+## Running directly from a Git ref
+
+Useful for testing branches or unreleased fixes:
+```bash
+uvx --from git+https://github.com/vectra-ai-research/vectra-ai-mcp-server@main vectra-ai-mcp-server
+```
+
+The same `--from git+...` form works inside an MCP client `args` list.
+
+# Setup - Host Locally (For Development)
+
+> Use this path if you're hacking on the server itself. End users should prefer the uvx setup above.
 
 ## Prerequisites
 
@@ -95,7 +181,7 @@ source .venv/bin/activate
 ```
 uv sync
 ```
-This will install all dependencies specified in pyproject.toml using the exact versions from uv.lock.
+This installs all dependencies from `uv.lock` and installs the package itself in editable mode, exposing the `vectra-ai-mcp-server` console script inside the venv.
 
 6. **Run the application:**
 
@@ -103,21 +189,24 @@ The server supports multiple transport protocols:
 
 ```bash
 # Run with stdio transport (default, for Claude Desktop)
-python server.py
-python server.py --transport stdio
+uv run vectra-ai-mcp-server
+uv run vectra-ai-mcp-server --transport stdio
 
 # Run with SSE transport (for HTTP-based MCP clients)
-python server.py --transport sse --host 0.0.0.0 --port 8000
+uv run vectra-ai-mcp-server --transport sse --host 0.0.0.0 --port 8000
 
 # Run with streamable-http transport (for production HTTP deployments)
-python server.py --transport streamable-http --host 0.0.0.0 --port 8000
+uv run vectra-ai-mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 
 # Run with multi-tenant YAML config
-python server.py --config tenants.yaml
-python server.py -c tenants.yaml --transport sse
+uv run vectra-ai-mcp-server --config tenants.yaml
+uv run vectra-ai-mcp-server -c tenants.yaml --transport sse
 
 # Enable debug logging
-python server.py --debug
+uv run vectra-ai-mcp-server --debug
+
+# Equivalent module form (also works after `uv sync`):
+uv run python -m vectra_mcp_server
 ```
 
 **Transport Options:**
@@ -132,7 +221,7 @@ export VECTRA_MCP_TRANSPORT=streamable-http
 export VECTRA_MCP_HOST=0.0.0.0
 export VECTRA_MCP_PORT=8000
 export VECTRA_MCP_DEBUG=true
-python server.py
+uv run vectra-ai-mcp-server
 ```
 
 ## MCP Configuration for Claude Desktop
@@ -149,6 +238,8 @@ notepad %APPDATA%/Claude/claude_desktop_config.json
 
 Add the following configuration to the `mcpServers` section (update the paths to match your setup):
 
+> **Tip**: For end-user setups (no source checkout), prefer the [`uvx` configuration](#setup---uvx-recommended-for-end-users) at the top of this README. The configs below are for running directly from a local source checkout — useful while you're developing the server.
+
 **Single Tenant:**
 ```json
 {
@@ -159,7 +250,7 @@ Add the following configuration to the `mcpServers` section (update the paths to
         "--directory",
         "/path/to/your/project/directory",
         "run",
-        "server.py"
+        "vectra-ai-mcp-server"
       ]
     }
   }
@@ -176,7 +267,7 @@ Add the following configuration to the `mcpServers` section (update the paths to
         "--directory",
         "/path/to/your/project/directory",
         "run",
-        "server.py",
+        "vectra-ai-mcp-server",
         "--config",
         "tenants.yaml"
       ]

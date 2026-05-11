@@ -10,8 +10,8 @@ import base64
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from config import VectraConfig
-from utils.logging import get_logger
+from .config import VectraConfig
+from .utils.logging import get_logger
 
 
 class VectraAPIError(Exception):

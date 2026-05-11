@@ -20,8 +20,8 @@ __pycache__/
 *.swo
 *~
 
-# Documentation and assets (optional - remove if needed in container)
-README.md
+# Assets are not needed at runtime. README.md is kept because pyproject.toml
+# references it via `readme = "README.md"` and the hatchling build needs it.
 assets/
 
 # Logs

@@ -11,18 +11,17 @@ from typing import Optional
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 
-from vectra_client import VectraClient
-from config import load_configuration, ServerConfiguration
-from utils.logging import setup_logging, get_logger, configure_debug_logging
+from .vectra_client import VectraClient
+from .config import load_configuration, ServerConfiguration
+from .utils.logging import setup_logging, get_logger, configure_debug_logging
 
-# Import MCP tools and prompts
-from tool.detection_tools import DetectionMCPTools
-from tool.entity_tools import EntityMCPTools
-from tool.investigation_tools import InvestigationMCPTools
-from tool.management_tools import ManagementMCPTools
-from tool.response_tools import ResponseMCPTools
-from prompt.prompt import VectraMCPPrompts
-from resources.investigation_resources import InvestigationResourceTools
+from .tool.detection_tools import DetectionMCPTools
+from .tool.entity_tools import EntityMCPTools
+from .tool.investigation_tools import InvestigationMCPTools
+from .tool.management_tools import ManagementMCPTools
+from .tool.response_tools import ResponseMCPTools
+from .prompt.prompt import VectraMCPPrompts
+from .resources.investigation_resources import InvestigationResourceTools
 
 logger = get_logger(__name__)
 
@@ -183,20 +182,25 @@ def parse_args():
         epilog="""
         Examples:
         # Run with stdio transport (default)
-        python server.py
-        python server.py --transport stdio
+        vectra-ai-mcp-server
+        vectra-ai-mcp-server --transport stdio
 
-        # Run with SSE transport (MCP endpoint at http://host:port/)
-        python server.py --transport sse
-        python server.py --transport sse --host 0.0.0.0 --port 8080
+        # Run with SSE transport (MCP endpoint at http://host:port/sse)
+        vectra-ai-mcp-server --transport sse
+        vectra-ai-mcp-server --transport sse --host 0.0.0.0 --port 8080
 
-        # Run with streamable-http transport (MCP endpoint at http://host:port/)
-        python server.py --transport streamable-http
-        python server.py --transport streamable-http --host 0.0.0.0 --port 8000
+        # Run with streamable-http transport (MCP endpoint at http://host:port/mcp)
+        vectra-ai-mcp-server --transport streamable-http
+        vectra-ai-mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 
         # Run with multi-tenant YAML config
-        python server.py --config tenants.yaml
-        python server.py -c tenants.yaml --transport sse
+        vectra-ai-mcp-server --config tenants.yaml
+        vectra-ai-mcp-server -c tenants.yaml --transport sse
+
+        # Equivalent forms:
+        python -m vectra_mcp_server
+        uvx vectra-ai-mcp-server                       # once published to PyPI
+        uvx --from . vectra-ai-mcp-server              # from a source checkout
         """
     )
 

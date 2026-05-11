@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from tool.base import BaseMCPTools
+from ..tool.base import BaseMCPTools
 
 
 _RESOURCES_DIR = os.path.dirname(os.path.abspath(__file__))

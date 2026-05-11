@@ -5,8 +5,8 @@ from pydantic import Field, IPvAnyAddress
 import json
 import base64
 
-from utils.validators import validate_date_range
-from tool.base import BaseMCPTools
+from ..utils.validators import validate_date_range
+from .base import BaseMCPTools
 
 
 class DetectionMCPTools(BaseMCPTools):
