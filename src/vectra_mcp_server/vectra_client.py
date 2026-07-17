@@ -621,8 +621,46 @@ class VectraClient:
     
     # Health endpoints
     async def get_health(self) -> Dict[str, Any]:
-        """Get system health status."""
+        """Get overall platform health status."""
         return await self._make_request("GET", "health")
+
+    async def get_edr_health(self) -> Dict[str, Any]:
+        """Get summary health status for EDR integrations."""
+        return await self._make_request("GET", "health/edr")
+
+    async def get_edr_health_details(
+        self,
+        edr_type: Optional[str] = None,
+        live: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Get detailed health status for EDR integrations."""
+        params = {k: v for k, v in {
+            "edr_type": edr_type,
+            "live": live,
+        }.items() if v is not None}
+        return await self._make_request("GET", "health/edr/details", params=params)
+
+    async def get_external_connectors_health(self) -> Dict[str, Any]:
+        """Get summary health status for external connectors."""
+        return await self._make_request("GET", "health/external_connectors")
+
+    async def get_external_connectors_health_details(
+        self,
+        connector_type: Optional[str] = None,
+        live: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Get detailed health status for external connectors."""
+        params = {k: v for k, v in {
+            "connector_type": connector_type,
+            "live": live,
+        }.items() if v is not None}
+        return await self._make_request(
+            "GET", "health/external_connectors/details", params=params
+        )
+
+    async def ping_network_brain(self) -> Dict[str, Any]:
+        """Ping the Network Brain health endpoint."""
+        return await self._make_request("GET", "health/network_brain/ping")
     
     # Notes endpoints
     async def add_entity_note(self, entity_id: int, type: str, note: str) -> Dict[str, Any]:

@@ -16,6 +16,8 @@ An MCP server that connects AI assistants to your Vectra AI security platform, e
 * Correlate and analyze security data using prompts
 * Dynamically build advanced visulizations for analysis
 * Generate investigation reports from natural language
+* Retrieve complete platform health or a specific health category, including EDR,
+  external connector, and Network Brain status
 
 # Setup - uvx (Recommended for End Users)
 

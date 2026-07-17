@@ -14,6 +14,140 @@ class ManagementMCPTools(BaseMCPTools):
     def register_tools(self):
         """Register all platform management tools with the MCP server."""
         self._register_tool(self.list_platform_users)
+        self._register_tool(self.get_platform_health)
+
+    async def get_platform_health(
+        self,
+        health_type: Annotated[
+            Literal[
+                "all",
+                "platform",
+                "edr",
+                "edr_details",
+                "external_connectors",
+                "external_connectors_details",
+                "network_brain_ping",
+            ],
+            Field(
+                description=(
+                    "Health information to fetch. Defaults to all, which returns platform, "
+                    "EDR, external connector, and Network Brain health information."
+                )
+            ),
+        ] = "all",
+        connector_type: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Comma-separated external connector types to include in detailed "
+                    "connector health. Valid values: active_directory, azure_ad_lockdown, "
+                    "aws, azure, google_cloud, reverse_lookup_dns, siem, vcenter, "
+                    "windows_event_log_ingestion, zscaler_private_access."
+                )
+            ),
+        ] = None,
+        edr_type: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional comma-separated EDR type filter for detailed EDR health. "
+                    "Passed directly to Vectra's edr_type query parameter."
+                )
+            ),
+        ] = None,
+        live: Annotated[
+            bool | None,
+            Field(
+                description=(
+                    "For detailed EDR and external-connector health, request a live "
+                    "refresh instead of cached health information."
+                )
+            ),
+        ] = None,
+    ) -> str:
+        """Get platform health, a specific health category, or complete diagnostics."""
+        self._validate_health_filters(health_type, connector_type, edr_type, live)
+
+        requests = {
+            "platform": self.client.get_health,
+            "edr": self.client.get_edr_health,
+            "edr_details": lambda: self.client.get_edr_health_details(
+                edr_type=edr_type, live=live
+            ),
+            "external_connectors": self.client.get_external_connectors_health,
+            "external_connectors_details": lambda: self.client.get_external_connectors_health_details(
+                connector_type=connector_type, live=live
+            ),
+            "network_brain_ping": self.client.ping_network_brain,
+        }
+
+        if health_type != "all":
+            try:
+                return json.dumps(await requests[health_type](), indent=2)
+            except Exception as exc:
+                raise Exception(
+                    f"Failed to fetch {health_type} health information: {exc}"
+                ) from exc
+
+        results = {}
+        errors = {}
+        for category, request in requests.items():
+            try:
+                results[category] = await request()
+            except Exception as exc:
+                error = {"type": type(exc).__name__, "message": str(exc)}
+                if getattr(exc, "status_code", None) is not None:
+                    error["status_code"] = exc.status_code
+                errors[category] = error
+
+        response = {"results": results}
+        if errors:
+            response["errors"] = errors
+        return json.dumps(response, indent=2)
+
+    @staticmethod
+    def _validate_health_filters(
+        health_type: str,
+        connector_type: str | None,
+        edr_type: str | None,
+        live: bool | None,
+    ) -> None:
+        """Validate filters before dispatching health requests."""
+        connector_detail_types = {"all", "external_connectors_details"}
+        edr_detail_types = {"all", "edr_details"}
+        detail_types = connector_detail_types | edr_detail_types
+
+        if connector_type and health_type not in connector_detail_types:
+            raise ValueError(
+                "connector_type is only valid for external_connectors_details or all"
+            )
+        if edr_type and health_type not in edr_detail_types:
+            raise ValueError("edr_type is only valid for edr_details or all")
+        if live is not None and health_type not in detail_types:
+            raise ValueError(
+                "live is only valid for edr_details, external_connectors_details, or all"
+            )
+
+        valid_connector_types = {
+            "active_directory",
+            "azure_ad_lockdown",
+            "aws",
+            "azure",
+            "google_cloud",
+            "reverse_lookup_dns",
+            "siem",
+            "vcenter",
+            "windows_event_log_ingestion",
+            "zscaler_private_access",
+        }
+        if connector_type:
+            requested_types = {item.strip() for item in connector_type.split(",") if item.strip()}
+            invalid_types = requested_types - valid_connector_types
+            if not requested_types or invalid_types:
+                raise ValueError(
+                    "Invalid connector_type values: "
+                    + ", ".join(sorted(invalid_types or {connector_type}))
+                )
 
     async def list_platform_users(
         self,
@@ -81,5 +215,3 @@ class ManagementMCPTools(BaseMCPTools):
             
         except Exception as e:
             raise Exception(f"Failed to list users : {str(e)}")
-
-    
