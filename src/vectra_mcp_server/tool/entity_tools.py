@@ -219,31 +219,23 @@ class EntityMCPTools(BaseMCPTools):
     ):
         """
         Retrieve information about a host entity by its IP address.
-        
+
+        Uses the /hosts endpoint with a last_source filter to identify the host
+        directly by IP address — no full-scan pagination required.
+
         Returns:
             str: Formatted string with host information including name, ID, type, last detection timestamp, prioritization status, urgency score, state, and IP address.
             If no hosts are found with the specified IP address, returns a message indicating that no matches were found.
             If an error occurs during the request, raises an exception with the error message.
         """
         try:
-            all_states = ["active", "inactive"]  # Define the states to search in
+            host_lookup = await self.client.get_hosts(last_source=str(host_ip))
+            matched_hosts = host_lookup.get("results", [])
 
-            for state in all_states:
-                # Perform the lookup in active then inactive states
-                host_lookup = await self.client.get_entities(
-                    type = "host",
-                    state = state,
-                    auto_paginate = True # Enable auto-pagination to fetch all results
-                )
+            if not matched_hosts:
+                return f"No hosts found associated with IP address: {host_ip}."
 
-                all_hosts = host_lookup.get("results", [])
-
-                for host in all_hosts:
-                    if host.get('ip') == str(host_ip):
-                        return json.dumps({"matched_host" : host}, indent=2)
-            
-            # If no match found in any state, return not found message
-            return f"No hosts found associated with IP address: {host_ip}."
+            return json.dumps({"match_count": len(matched_hosts), "matched_hosts": matched_hosts}, indent=2)
 
         except Exception as e:
             raise Exception(f"Failed to fetch host info: {str(e)}")

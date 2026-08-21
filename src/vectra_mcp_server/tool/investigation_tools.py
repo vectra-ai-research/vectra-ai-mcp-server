@@ -38,6 +38,8 @@ class InvestigationMCPTools(BaseMCPTools):
         self._register_tool(self.create_entity_note, ADDITIVE_EACH_CALL)
         # Suppresses detections from the active queue and from entity scoring.
         self._register_tool(self.mark_detection_fixed, DESTRUCTIVE)
+        # Closes a detection, removing it from the queue and from entity scoring.
+        self._register_tool(self.close_detection, DESTRUCTIVE)
         # Submits a new async query job; returns a fresh request_id each call.
         self._register_tool(self.run_investigation, ADDITIVE_EACH_CALL)
         self._register_tool(self.get_investigation_results, READ_ONLY)
@@ -282,6 +284,38 @@ class InvestigationMCPTools(BaseMCPTools):
         except Exception as e:
             raise Exception(f"Failed to mark detections: {str(e)}")
         
+    async def close_detection(
+        self,
+        detection_id: Annotated[
+            int,
+            Field(description="ID of the detection to close.", ge=1)
+        ],
+        reason: Annotated[
+            Literal["remediated", "benign"],
+            Field(description=(
+                "Reason for closing the detection. "
+                "'remediated' — a corrective action was taken to address the threat. "
+                "'benign' — the activity was reviewed and determined not to be a threat."
+            ))
+        ],
+    ) -> str:
+        """
+        Close a single detection, removing it from the active queue and stopping it
+        from contributing to entity scoring.
+
+        Use 'remediated' when the threat was real and an action was taken to address it.
+        Use 'benign' when the detection was reviewed and confirmed not to be a threat
+        (equivalent to a Benign True Positive verdict).
+
+        Returns:
+            str: JSON confirmation from the API, or an error message.
+        """
+        try:
+            result = await self.client.close_detection(detection_id=detection_id, reason=reason)
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            raise Exception(f"Failed to close detection {detection_id}: {str(e)}")
+
     async def delete_assignment(
         self,
         assignment_id: Annotated[

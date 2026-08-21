@@ -1,11 +1,11 @@
 """MCP tools for platform management."""
 
 from typing import Literal, Annotated
-from pydantic import Field
+from pydantic import Field, IPvAnyAddress
 import json
 
 from ..utils.validators import validate_date_range
-from .base import READ_ONLY, BaseMCPTools
+from .base import ADDITIVE, READ_ONLY, BaseMCPTools
 
 
 class ManagementMCPTools(BaseMCPTools):
@@ -15,6 +15,10 @@ class ManagementMCPTools(BaseMCPTools):
         """Register all platform management tools with the MCP server."""
         self._register_tool(self.list_platform_users, READ_ONLY)
         self._register_tool(self.get_platform_health, READ_ONLY)
+        self._register_tool(self.list_triage_rules, READ_ONLY)
+        self._register_tool(self.list_groups, READ_ONLY)
+        # Appends one member to an existing group; re-appending is a no-op.
+        self._register_tool(self.add_member_to_group, ADDITIVE)
 
     async def get_platform_health(
         self,
@@ -215,3 +219,147 @@ class ManagementMCPTools(BaseMCPTools):
             
         except Exception as e:
             raise Exception(f"Failed to list users : {str(e)}")
+
+    async def list_triage_rules(
+        self,
+        ordering: Annotated[
+            Literal["id", "-id", "name", "-name"] | None,
+            Field(description="Sort order. Prefix with '-' for descending. Options: 'id', '-id', 'name', '-name'.")
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(description="Maximum number of rules to return.", ge=1, le=1000)
+        ] = 1000
+    ) -> str:
+        """
+        List triage rules configured in the Vectra platform.
+
+        Returns:
+            str: JSON string with the list of triage rules including their IDs, names, and configuration.
+            If no rules are found, returns a message indicating that.
+        """
+        try:
+            params = {}
+            if ordering:
+                params["ordering"] = ordering
+            if limit:
+                params["page_size"] = limit
+
+            rules_response = await self.client.get_rules(**params)
+            rules = rules_response.get("results", [])
+
+            if not rules:
+                return "No triage rules found."
+
+            return json.dumps({"rule_count": len(rules), "rules": rules}, indent=2)
+
+        except Exception as e:
+            raise Exception(f"Failed to list triage rules: {str(e)}")
+
+    async def list_groups(
+        self,
+        group_type: Annotated[
+            Literal["host", "account", "ip", "domain"] | None,
+            Field(description="Filter by group type: 'host', 'account', 'ip', or 'domain'. Omit to return all types.")
+        ] = None,
+        name: Annotated[
+            str | None,
+            Field(description="Filter by group name (partial match supported).")
+        ] = None,
+    ) -> str:
+        """
+        List groups configured in the Vectra platform.
+
+        Each group in the response includes the triage rules it is attached to,
+        making it easy to identify which groups are already wired to authorization rules.
+
+        Group types and their member identifiers:
+          - host: members identified by Vectra host entity ID (integer)
+          - account: members identified by account UID string (e.g. 'O365:user@domain.com')
+          - ip: members identified by IP address string
+          - domain: members identified by domain string (e.g. '*.example.com')
+
+        Returns:
+            str: JSON string with group list including type, member count, and attached triage rules.
+        """
+        try:
+            params = {}
+            if group_type:
+                params["type"] = group_type
+            if name:
+                params["name"] = name
+
+            groups_response = await self.client.get_groups(**params)
+            groups = groups_response.get("results", [])
+
+            if not groups:
+                return "No groups found matching the specified criteria."
+
+            return json.dumps({"group_count": len(groups), "groups": groups}, indent=2)
+
+        except Exception as e:
+            raise Exception(f"Failed to list groups: {str(e)}")
+
+    async def add_member_to_group(
+        self,
+        group_id: Annotated[
+            int,
+            Field(description="ID of the group to add the member to.", ge=1)
+        ],
+        group_type: Annotated[
+            Literal["host", "account", "ip", "domain"],
+            Field(description=(
+                "Type of the group. Must match the group's actual type. "
+                "Determines which field is used to identify the member: "
+                "host=entity ID (integer), account=UID string, ip=IP address string, domain=domain string."
+            ))
+        ],
+        member_value: Annotated[
+            str,
+            Field(description=(
+                "The member to add. Format depends on group_type: "
+                "host: the Vectra host entity ID as a number (e.g. '105313'); "
+                "account: the account UID (e.g. 'O365:user@domain.com'); "
+                "ip: an IP address (e.g. '10.1.2.3'); "
+                "domain: a domain string (e.g. '*.example.com')."
+            ))
+        ],
+    ) -> str:
+        """
+        Add a single member to an existing Vectra group using the append membership action.
+
+        This is the preferred way to authorize behaviour: add the relevant entity to a group
+        that is already attached to a triage rule, rather than modifying the rule directly.
+
+        The member format must match the group type — you cannot add a host ID to an IP group
+        or an IP address to a host group.
+
+        Returns:
+            str: JSON confirmation of the updated group, or an error message.
+        """
+        try:
+            # Build the correctly-typed member payload
+            if group_type == "host":
+                try:
+                    host_id = int(member_value)
+                except ValueError:
+                    return f"Invalid member_value for a host group: '{member_value}' is not a valid integer host ID."
+                member_payload = {"id": host_id}
+            elif group_type == "account":
+                member_payload = {"uid": member_value}
+            elif group_type == "ip":
+                member_payload = {"ip": member_value}
+            elif group_type == "domain":
+                member_payload = {"domain": member_value}
+            else:
+                return f"Unknown group_type: {group_type}"
+
+            result = await self.client.update_group(
+                group_id=group_id,
+                update_data={"members": [member_payload]},
+                membership_action="append"
+            )
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            raise Exception(f"Failed to add member to group: {str(e)}")

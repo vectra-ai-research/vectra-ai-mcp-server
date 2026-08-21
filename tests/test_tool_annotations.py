@@ -31,15 +31,18 @@ TOOL_CLASSES = (
 # Adding a tool to this set is a deliberate act; forgetting to is caught by
 # test_no_unexpected_mutating_tools.
 EXPECTED_MUTATING = {
+    "add_member_to_group",
+    "close_detection",
     "create_assignment",
-    "delete_assignment",
     "create_entity_note",
+    "delete_assignment",
     "mark_detection_fixed",
     "run_investigation",
 }
 
 # Of those, the ones that remove, close, or suppress existing state.
 EXPECTED_DESTRUCTIVE = {
+    "close_detection",
     "delete_assignment",
     "mark_detection_fixed",
 }

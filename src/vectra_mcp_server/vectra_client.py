@@ -554,6 +554,12 @@ class VectraClient:
             "mark_as_fixed": str(fixed_status)
         }
         return await self._make_request("PATCH", f"detections", json_data=mark_data)
+
+    async def close_detection(self, detection_id: int, reason: str) -> Dict[str, Any]:
+        """Close a single detection with a given reason (remediated or benign)."""
+        return await self._make_request(
+            "PATCH", f"detections/{detection_id}/close/", json_data={"reason": reason}
+        )
     
     # Event endpoints
     async def get_events(
@@ -707,9 +713,27 @@ class VectraClient:
         """Create new group."""
         return await self._make_request("POST", "groups", json_data=group_data)
     
-    async def update_group(self, group_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update existing group."""
-        return await self._make_request("PATCH", f"groups/{group_id}", json_data=update_data)
+    async def update_group(
+        self,
+        group_id: int,
+        update_data: Dict[str, Any],
+        membership_action: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update existing group.
+
+        Args:
+            group_id: ID of the group to update.
+            update_data: Body payload (e.g. {"members": [...]}).
+            membership_action: How to apply the member list — "append" adds the
+                supplied members, "remove" deletes them, "replace" (default) overwrites
+                the entire membership list.
+        """
+        params = {}
+        if membership_action:
+            params["membership_action"] = membership_action
+        return await self._make_request(
+            "PATCH", f"groups/{group_id}", params=params or None, json_data=update_data
+        )
     
     async def delete_group(self, group_id: int) -> Dict[str, Any]:
         """Delete group."""
