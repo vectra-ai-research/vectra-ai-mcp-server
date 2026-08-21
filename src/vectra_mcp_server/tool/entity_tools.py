@@ -21,9 +21,9 @@ class EntityMCPTools(BaseMCPTools):
     async def list_entities(
         self,
         entity_type: Annotated[
-            Literal["account", "host"], 
-            Field(description="Select type of entity to retrieve. Options are 'account' or 'host'.")
-        ],
+            Literal["account", "host"] | None,
+            Field(description="Restrict results to one entity type. Leave unset (None, the default) to return hosts and accounts together — the underlying `type` filter is optional, and omitting it gives the unified queue view. Sent to the API as `type`.")
+        ] = None,
         state: Annotated[
             Literal["active", "inactive"], 
             Field(description="Filter by entity state (active, inactive)")
@@ -41,9 +41,9 @@ class EntityMCPTools(BaseMCPTools):
             Field(description="Filter by entity IP address. Only applicable for host entities.")
         ] = None,
         is_prioritized: Annotated[
-            bool, 
-            Field(description="Filter for prioritized entities or non-prioritized entities. Defaults to True to return only prioritized entities.")
-        ] = True,
+            bool | None,
+            Field(description="Filter for prioritized entities (True) or non-prioritized entities (False). 'Prioritized' is a manual/platform flag and is independent of urgency_score — it is not a proxy for urgency. Setting it narrows the result set silently. Leave unset (None, the default) to return entities regardless of prioritization status.")
+        ] = None,
         tags: Annotated[
             str | None, 
             Field(description="Filter for entities with a particular tag")
@@ -55,6 +55,12 @@ class EntityMCPTools(BaseMCPTools):
     )-> str:
         """
         List entities (hosts & accounts) in Vectra platform based on various filters. This tool returns entities with all their detailed information.
+
+        By default both hosts and accounts are returned in one call; set
+        entity_type only to restrict to one of them.
+
+        Ordering by urgency_score (ascending) or -urgency_score (descending) is
+        independent of the is_prioritized filter; the two are unrelated fields.
 
         Returns:
             str: Formatted string with list of detections.

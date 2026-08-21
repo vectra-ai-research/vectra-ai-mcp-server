@@ -82,12 +82,28 @@ class DetectionMCPTools(BaseMCPTools):
             Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")
         ] = False,
         limit: Annotated[
-            int, 
-            Field(description="Maximum number of detections to return in the batch. Defaults to 1000", ge = 1, le=1000)
-        ] = 1000
+            int,
+            Field(description="Maximum number of detections to return in the batch. Defaults to 25 — this tool returns full per-detection detail, so a large limit on a broad query can produce very large responses.", ge = 1, le=1000)
+        ] = 25,
+        exclude_fields: Annotated[
+            str | None,
+            Field(description=(
+                "Comma-separated fields to omit from each detection. Defaults to "
+                "'process_context_data,grouped_details', which together account for "
+                "most of a detection's size (a CrowdStrike query link is ~4KB; "
+                "grouped_details repeats one payload per occurrence). Pass None to "
+                "return every field. Use get_detection_details for the full object "
+                "on a single detection."
+            ))
+        ] = "process_context_data,grouped_details"
     )-> str:
         """
-        List detections with filtering and sorting options. Use this to get a detailed list of detections based on various criteria.
+        List detections WITH DETAIL for a small, already-identified set of detections.
+
+        Two heavy fields are excluded by default (see exclude_fields), which
+        reduces a typical detection from roughly 15-20KB to 3-5KB. Even so, start
+        with list_detection_ids or list_detections_with_basic_info for a broad or
+        exploratory pull and narrow with filters before calling this.
 
         Returns:
             str: JSON string with list of detections.
@@ -285,11 +301,27 @@ class DetectionMCPTools(BaseMCPTools):
         start_date: Annotated[str | None, Field(description="Filter by start date (YYYY-MM-DDTHH:MM:SS)")] = None,
         end_date: Annotated[str | None, Field(description="Filter by end date (YYYY-MM-DDTHH:MM:SS)")] = None,
         is_targeting_key_asset: Annotated[bool, Field(description="Filter for detections targeting a key asset. Defaults to 'False'. Set to 'True' to filter for detections that are targeting key assets. To get all detections regardless of key asset targeting, search for both True and False values.")] = False,
-        limit: Annotated[int, Field(description="Maximum number of detections to return in the batch.", ge = 1, le=1000)] = None
+        limit: Annotated[int, Field(description="Maximum number of detections to return in the batch. Defaults to 100.", ge = 1, le=1000)] = 100,
+        exclude_fields: Annotated[
+            str | None,
+            Field(description=(
+                "Comma-separated fields to omit from the API response. Defaults to "
+                "'process_context_data,grouped_details'. This tool already trims to a "
+                "compact summary, so excluding them server-side saves transfer rather "
+                "than changing the output. Pass None to fetch everything."
+            ))
+        ] = "process_context_data,grouped_details"
     )-> str:
         """
-        List detections with basic information and filtering options. Use this to get a quick overview of detections without detailed information.
-        
+        List detections with a compact per-detection summary (id, name, category,
+        last_timestamp, is_triaged, state, entity_type) — no full detail.
+
+        This is the right first call for a broad or exploratory pull ("what's
+        active right now", "any pattern worth handling together"). Once you've
+        identified specific detections worth a closer look, escalate to
+        get_detection_details / get_detection_summary for those individual IDs,
+        or list_detections_with_details only for a small, already-narrowed set.
+
         Returns:
             str: JSON string with list of detections ids.
         """
@@ -418,7 +450,12 @@ class DetectionMCPTools(BaseMCPTools):
         ] = 1000
     )-> str:
         """
-        List detection IDs with filtering and sorting options. Use this to get a list of detection IDs based on various criteria.
+        List only detection IDs matching the given filters — the lightest-weight
+        of the three detection-listing tools (see also
+        list_detections_with_basic_info, list_detections_with_details). Use this
+        first when you just need a count or a set of IDs to feed into another
+        call, e.g. before batch-processing or before narrowing with
+        list_detections_with_basic_info.
 
         Returns:
             str: JSON string with list of detection IDs.
