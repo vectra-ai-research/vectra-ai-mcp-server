@@ -99,15 +99,19 @@ def test_returns_section_survives_the_prefix(single, prefixed):
     assert checked > 20, f"expected most tools to document returns, saw {checked}"
 
 
-def test_mark_detection_fixed_keeps_its_second_line(prefixed):
-    """Concrete case: a destructive tool whose first line omits what it does.
+def test_mark_detection_fixed_keeps_its_deprecation_caveat(prefixed):
+    """Concrete case, and the worst shape this bug takes.
 
-    Truncated, the description read only "Marks or unmark detection as fixed."
-    and lost the sentence explaining that marking closes the detection as
-    remediated.
+    mark_detection_fixed's *first line* carries the DEPRECATED notice, so a
+    truncated description still reads as informative -- while silently dropping
+    the caveat that it writes separate state from the close/open lifecycle and
+    therefore cannot reopen a closed detection. Truncation is most dangerous
+    exactly where the summary line looks complete.
     """
     description = prefixed["prod_mark_detection_fixed"].description
-    assert "closed as remediated" in description
+    assert "DEPRECATED" in description  # would survive truncation
+    assert "SEPARATE STATE" in description  # would not
+    assert "close_detections" in description
 
 
 def test_single_tenant_descriptions_are_untouched(single):

@@ -555,10 +555,28 @@ class VectraClient:
         }
         return await self._make_request("PATCH", f"detections", json_data=mark_data)
 
-    async def close_detection(self, detection_id: int, reason: str) -> Dict[str, Any]:
-        """Close a single detection with a given reason (remediated or benign)."""
+    async def close_detections(self, detection_ids: list, reason: str) -> Dict[str, Any]:
+        """Close one or more detections with a reason (remediated or benign).
+
+        PATCH /detections/close/ -- the bulk form. Closing stops a detection
+        contributing to entity scoring.
+        """
         return await self._make_request(
-            "PATCH", f"detections/{detection_id}/close/", json_data={"reason": reason}
+            "PATCH",
+            "detections/close/",
+            json_data={"detectionIdList": detection_ids, "reason": reason},
+        )
+
+    async def reopen_detections(self, detection_ids: list) -> Dict[str, Any]:
+        """Re-open one or more previously closed detections.
+
+        PATCH /detections/open/ -- the bulk form. Opening triggers a rescore of
+        the affected entities.
+        """
+        return await self._make_request(
+            "PATCH",
+            "detections/open/",
+            json_data={"detectionIdList": detection_ids},
         )
     
     # Event endpoints

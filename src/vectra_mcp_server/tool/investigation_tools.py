@@ -8,6 +8,7 @@ import json
 from ..utils.logging import get_logger
 from ..utils.validators import validate_date_range
 from .base import (
+    ADDITIVE,
     ADDITIVE_EACH_CALL,
     DESTRUCTIVE,
     READ_ONLY,
@@ -36,10 +37,13 @@ class InvestigationMCPTools(BaseMCPTools):
         self._register_tool(self.get_assignment_for_entity, READ_ONLY)
         # Each call appends a new note.
         self._register_tool(self.create_entity_note, ADDITIVE_EACH_CALL)
-        # Suppresses detections from the active queue and from entity scoring.
+        # DEPRECATED in favour of close_detections; writes the legacy
+        # mark_as_fixed field, which is separate state from close/open.
         self._register_tool(self.mark_detection_fixed, DESTRUCTIVE)
-        # Closes a detection, removing it from the queue and from entity scoring.
-        self._register_tool(self.close_detection, DESTRUCTIVE)
+        # Removes detections from the queue and from entity scoring.
+        self._register_tool(self.close_detections, DESTRUCTIVE)
+        # Restores closed detections to the queue; triggers a rescore.
+        self._register_tool(self.reopen_detections, ADDITIVE)
         # Submits a new async query job; returns a fresh request_id each call.
         self._register_tool(self.run_investigation, ADDITIVE_EACH_CALL)
         self._register_tool(self.get_investigation_results, READ_ONLY)
@@ -267,9 +271,17 @@ class InvestigationMCPTools(BaseMCPTools):
         ]
     ) -> str:
         """
-        Marks or unmark detection as fixed.
-        For marking as fixed, the detection will be closed as remediated, indicating it has been addressed.
-        
+        DEPRECATED -- use close_detections instead. Marks or unmarks detections as fixed.
+
+        This writes the legacy 'mark_as_fixed' field via PATCH /detections, which is
+        SEPARATE STATE from the close/open lifecycle. A detection closed with
+        close_detections cannot be reopened by calling this with mark_fixed=False,
+        and a detection marked fixed here does not carry a close reason.
+
+        Prefer close_detections (which records why: remediated or benign) and
+        reopen_detections (which reverses it). This tool remains only for
+        compatibility with existing callers and will be removed in 0.5.0.
+
         Returns:
             str: Confirmation message of operation.
         Raises:
@@ -277,44 +289,75 @@ class InvestigationMCPTools(BaseMCPTools):
         """
         if not detection_ids:
             return "No detection IDs provided."
-        
+
         try:
             response = await self.client.mark_detection_fixed(detection_ids, mark_fixed)
             return f"Marked {len(detection_ids)} detections as {'fixed' if mark_fixed else 'not fixed'}."
         except Exception as e:
             raise Exception(f"Failed to mark detections: {str(e)}")
-        
-    async def close_detection(
+
+    async def close_detections(
         self,
-        detection_id: Annotated[
-            int,
-            Field(description="ID of the detection to close.", ge=1)
+        detection_ids: Annotated[
+            List[int],
+            Field(description="IDs of the detections to close. Pass a single-element list to close one.")
         ],
         reason: Annotated[
             Literal["remediated", "benign"],
             Field(description=(
-                "Reason for closing the detection. "
+                "Reason for closing. "
                 "'remediated' — a corrective action was taken to address the threat. "
                 "'benign' — the activity was reviewed and determined not to be a threat."
             ))
         ],
     ) -> str:
         """
-        Close a single detection, removing it from the active queue and stopping it
-        from contributing to entity scoring.
+        Close one or more detections, removing them from the active queue and
+        stopping them from contributing to entity scoring.
 
-        Use 'remediated' when the threat was real and an action was taken to address it.
-        Use 'benign' when the detection was reviewed and confirmed not to be a threat
-        (equivalent to a Benign True Positive verdict).
+        All detections in the call are closed with the same reason, so group IDs by
+        reason and make one call per reason. Reversible with reopen_detections.
 
         Returns:
             str: JSON confirmation from the API, or an error message.
         """
+        if not detection_ids:
+            return "No detection IDs provided."
+
         try:
-            result = await self.client.close_detection(detection_id=detection_id, reason=reason)
+            result = await self.client.close_detections(
+                detection_ids=detection_ids, reason=reason
+            )
             return json.dumps(result, indent=2)
         except Exception as e:
-            raise Exception(f"Failed to close detection {detection_id}: {str(e)}")
+            raise Exception(f"Failed to close detections {detection_ids}: {str(e)}")
+
+    async def reopen_detections(
+        self,
+        detection_ids: Annotated[
+            List[int],
+            Field(description="IDs of the closed detections to re-open. Pass a single-element list to re-open one.")
+        ],
+    ) -> str:
+        """
+        Re-open one or more previously closed detections, returning them to the
+        active queue.
+
+        Opening triggers a rescore of the affected entities, so their urgency
+        scores may change as a result of this call. This reverses close_detections;
+        it does not reverse mark_detection_fixed, which writes separate state.
+
+        Returns:
+            str: JSON confirmation from the API, or an error message.
+        """
+        if not detection_ids:
+            return "No detection IDs provided."
+
+        try:
+            result = await self.client.reopen_detections(detection_ids=detection_ids)
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            raise Exception(f"Failed to re-open detections {detection_ids}: {str(e)}")
 
     async def delete_assignment(
         self,
