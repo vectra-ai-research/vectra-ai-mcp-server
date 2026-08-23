@@ -1,6 +1,7 @@
 """Base class for MCP tool registration with multi-tenant prefix support."""
 
 import functools
+import inspect
 from typing import Optional
 
 from mcp.types import ToolAnnotations
@@ -80,7 +81,7 @@ class BaseMCPTools:
         -- no name or description override.
 
         In multi-tenant mode, the tool name becomes ``{prefix}_{method.__name__}``
-        and the first line of the docstring is prefixed with ``[{tenant_label}]``.
+        and the whole docstring is prefixed with ``[{tenant_label}]``.
 
         Args:
             method: The bound coroutine to expose as a tool.
@@ -90,11 +91,21 @@ class BaseMCPTools:
         """
         if self.prefix:
             name = f"{self.prefix}_{method.__name__}"
-            # Build a prefixed description from the docstring's first line
+            # Prefix the tenant label onto the *whole* docstring.
+            #
+            # This previously kept only the first line, which silently discarded
+            # everything below it: the ``Returns:`` block (present on 25 of the
+            # 28 tools), second-paragraph semantics, and any multi-line guidance a
+            # tool carries. Tool descriptions therefore got materially worse in
+            # multi-tenant deployments -- the environments where precision about
+            # which tenant a call lands on matters most.
+            #
+            # The single-tenant path never had the bug: it passes no description,
+            # so FastMCP falls back to the full ``fn.__doc__``.
             description = None
             if method.__doc__:
-                first_line = method.__doc__.strip().split("\n")[0].strip()
-                description = f"[{self.tenant_label or self.prefix}] {first_line}"
+                label = self.tenant_label or self.prefix
+                description = f"[{label}] {inspect.cleandoc(method.__doc__)}"
 
             # We need a wrapper with a distinct identity so FastMCP doesn't
             # reject duplicate registrations of the same function object.
