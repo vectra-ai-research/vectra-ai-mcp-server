@@ -6,7 +6,7 @@ import json
 import base64
 
 from ..utils.validators import validate_date_range
-from .base import READ_ONLY, BaseMCPTools
+from .base import READ_ONLY, BaseMCPTools, validate_detection_fields
 
 
 class DetectionMCPTools(BaseMCPTools):
@@ -89,25 +89,31 @@ class DetectionMCPTools(BaseMCPTools):
             str | None,
             Field(description=(
                 "Comma-separated fields to omit from each detection. Defaults to "
-                "'process_context_data,grouped_details', which together account for "
-                "most of a detection's size (a CrowdStrike query link is ~4KB; "
-                "grouped_details repeats one payload per occurrence). Pass None to "
-                "return every field. Use get_detection_details for the full object "
-                "on a single detection."
+                "'grouped_details', which repeats one payload per occurrence and is "
+                "typically the largest single field (~7KB of a ~15-20KB detection). "
+                "Pass None to return every field. Values must be from the API's "
+                "accepted set — an unrecognised name makes the API reject the "
+                "parameter and return nothing. Use get_detection_details for the "
+                "full object on a single detection."
             ))
-        ] = "process_context_data,grouped_details"
+        ] = "grouped_details"
     )-> str:
         """
         List detections WITH DETAIL for a small, already-identified set of detections.
 
-        Two heavy fields are excluded by default (see exclude_fields), which
-        reduces a typical detection from roughly 15-20KB to 3-5KB. Even so, start
-        with list_detection_ids or list_detections_with_basic_info for a broad or
+        `grouped_details` is excluded by default (see exclude_fields), which
+        roughly halves a typical detection. Even so, start with
+        list_detection_ids or list_detections_with_basic_info for a broad or
         exploratory pull and narrow with filters before calling this.
+
+        Note `process_context_data` cannot be excluded — it is not in the API's
+        accepted field set, despite appearing on the response. Use
+        get_detection_summary if you want a compact view without it.
 
         Returns:
             str: JSON string with list of detections.
         """
+        validate_detection_fields(exclude_fields)
         params = locals().copy()
 
         # Remove non-query parameters
@@ -306,11 +312,13 @@ class DetectionMCPTools(BaseMCPTools):
             str | None,
             Field(description=(
                 "Comma-separated fields to omit from the API response. Defaults to "
-                "'process_context_data,grouped_details'. This tool already trims to a "
-                "compact summary, so excluding them server-side saves transfer rather "
-                "than changing the output. Pass None to fetch everything."
+                "'grouped_details'. This tool already trims to a compact summary, so "
+                "excluding it server-side saves transfer rather than changing the "
+                "output. Values must be from the API's accepted set — an "
+                "unrecognised name makes the API reject the parameter and return "
+                "nothing. Pass None to fetch everything."
             ))
-        ] = "process_context_data,grouped_details"
+        ] = "grouped_details"
     )-> str:
         """
         List detections with a compact per-detection summary (id, name, category,
@@ -325,6 +333,7 @@ class DetectionMCPTools(BaseMCPTools):
         Returns:
             str: JSON string with list of detections ids.
         """
+        validate_detection_fields(exclude_fields)
         params = locals().copy()
 
         # Remove non-query parameters

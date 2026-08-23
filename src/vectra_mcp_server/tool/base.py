@@ -56,6 +56,44 @@ DESTRUCTIVE = ToolAnnotations(
 )
 
 
+#: Values the detections API accepts for `fields` / `exclude_fields`. Passing
+#: anything outside this set makes the API reject the whole parameter, and the
+#: call comes back **empty rather than erroring** — a silent empty queue.
+#: Learned the hard way: `process_context_data` looks like a field on the
+#: response (it is) but is not in the enum, and defaulting to it emptied both
+#: detection-listing tools against a 162-detection queue.
+DETECTION_FIELD_NAMES = frozenset({
+    "id", "assigned_to", "assigned_date", "certainty", "created_timestamp",
+    "custom_detection", "data_source", "description", "detection",
+    "detection_category", "detection_type", "detection_url", "groups",
+    "filtered_by_rule", "filtered_by_ai", "filtered_by_user",
+    "first_timestamp", "grouped_details", "last_timestamp", "is_custom_model",
+    "is_marked_custom", "is_targeting_key_asset", "is_triaged", "note",
+    "notes", "note_modified_by", "note_modified_timestamp", "reason",
+    "sensor", "sensor_name", "src_account", "src_host", "src_ip", "state",
+    "summary", "tags", "threat", "triage_rule_id", "type", "url",
+})
+
+
+def validate_detection_fields(value: Optional[str], param: str = "exclude_fields") -> None:
+    """Raise on a field name the detections API will reject.
+
+    Fail loudly here rather than let the API silently return nothing. An empty
+    result that means "your parameter was invalid" is indistinguishable from
+    one that means "no detections match".
+    """
+    if not value:
+        return
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    unknown = [n for n in names if n not in DETECTION_FIELD_NAMES]
+    if unknown:
+        raise ValueError(
+            f"{param} contains value(s) the detections API does not accept: "
+            f"{', '.join(unknown)}. Accepted: "
+            f"{', '.join(sorted(DETECTION_FIELD_NAMES))}"
+        )
+
+
 class BaseMCPTools:
     """Base class providing prefixed tool registration for multi-tenancy."""
 

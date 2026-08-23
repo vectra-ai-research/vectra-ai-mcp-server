@@ -22,7 +22,12 @@ import pytest
 from vectra_mcp_server.tool.detection_tools import DetectionMCPTools
 from vectra_mcp_server.tool.entity_tools import EntityMCPTools
 
-HEAVY = {"process_context_data", "grouped_details"}
+#: What the listing tools exclude by default. `grouped_details` only —
+#: `process_context_data` is NOT in the API's accepted enum, and defaulting to
+#: it made the API reject the whole parameter and return an empty list against
+#: a 162-detection queue. Silent, and the same failure shape this module exists
+#: to prevent.
+HEAVY = {"grouped_details"}
 
 
 @pytest.fixture
@@ -53,6 +58,38 @@ async def test_exclusion_is_overridable(client):
     """The caller can still ask for everything — the default is a guard, not a wall."""
     await DetectionMCPTools(None, client).list_detections_with_details(exclude_fields=None)
     assert "exclude_fields" not in client.get_detections.await_args.kwargs
+
+
+async def test_default_exclusions_are_all_accepted_by_the_api(client):
+    """The regression that shipped: a field name outside the API's enum makes it
+    reject the parameter and return nothing, so both listing tools came back
+    empty against a real queue. Pin every default against the accepted set."""
+    from vectra_mcp_server.tool.base import DETECTION_FIELD_NAMES
+    import inspect
+    tools = DetectionMCPTools(None, client)
+    for fn in (tools.list_detections_with_details, tools.list_detections_with_basic_info):
+        default = inspect.signature(fn).parameters["exclude_fields"].default
+        for name in default.split(","):
+            assert name.strip() in DETECTION_FIELD_NAMES, (
+                f"{fn.__name__} defaults to excluding '{name.strip()}', which the "
+                f"detections API does not accept — the call will return empty"
+            )
+
+
+async def test_invalid_exclude_field_fails_loudly(client):
+    """An unrecognised name must raise, not silently empty the result."""
+    with pytest.raises(ValueError, match="does not accept"):
+        await DetectionMCPTools(None, client).list_detections_with_details(
+            exclude_fields="process_context_data"
+        )
+    client.get_detections.assert_not_awaited()
+
+
+async def test_process_context_data_is_not_excludable(client):
+    """It appears on the response but is absent from the enum — the exact trap."""
+    from vectra_mcp_server.tool.base import DETECTION_FIELD_NAMES
+    assert "process_context_data" not in DETECTION_FIELD_NAMES
+    assert "grouped_details" in DETECTION_FIELD_NAMES
 
 
 async def test_details_limit_defaults_low(client):
