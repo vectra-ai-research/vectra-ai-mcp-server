@@ -10,13 +10,14 @@ The dialect uses 3-part table names: `<data_source>.<stream>.<source_id>`. For i
 
 | Data source | Description | Tables (fully-qualified) |
 |---|---|---|
-| `network` | network telemetry | `network.beacon._all`, `network.dce_rpc._all`, `network.dhcp._all`, `network.dns._all`, `network.http._all`, `network.isession._all`, `network.kerberos._all`, `network.ldap._all`, `network.match._all` (Suricata), `network.ntlm._all`, `network.radius._all`, `network.rdp._all`, `network.smb_files._all`, `network.smb_mapping._all`, `network.ssh._all`, `network.ssl._all`, `network.x509._all` |
-| `o365` (a.k.a. `m365`) | Microsoft 365 audit | `m365.active_directory._all`, `m365.exchange._all`, `m365.general._all`, `m365.sharepoint._all`, `m365.directory_audits._all`, `m365.signins._all` |
+| `network` | network telemetry | `network.beacon._all`, `network.dce_rpc._all`, `network.dhcp._all`, `network.dns._all`, `network.http._all`, `network.isession._all`, `network.kerberos._all`, `network.ldap._all`, `network.match._all` (Suricata), `network.ntlm._all`, `network.radius._all`, `network.rdp._all`, `network.smb_files._all`, `network.smb_mapping._all`, `network.ssh._all`, `network.ssl._all`, `network.x509._all` — **no `network.smtp`**; confirmed live as `TABLE_NOT_FOUND`, do not use it. |
+| `entra` | Entra ID (Azure AD) sign-ins & directory audits | `entra.signins._all`, `entra.directoryaudits._all` — these are the current, documented table names (confirmed live). |
+| `o365` (a.k.a. `m365`) | Microsoft 365 audit | `m365.active_directory._all`, `m365.exchange._all`, `m365.general._all`, `m365.sharepoint._all` per the current schema docs. `m365.signins._all` / `m365.directory_audits._all` are **not** in the current schema reference — use `entra.signins` / `entra.directoryaudits` instead. (The old `m365.*` names have been observed to still return results live; treat that as an undocumented legacy alias, not a supported contract, and prefer `entra.*`.) |
 | `aws` | AWS CloudTrail | `aws.cloudtrail._all` |
 | `azurecp` | Azure control-plane | `azurecp.operations._all`, `azurecp.flowlogs._all` |
 
 Notes:
-- `_all` IS MANDATORY for natural-language queries; the validator will auto-append it if missing on supported tables.
+- The `._all` suffix is **optional** — bare table names (`entra.signins`) and `._all`-suffixed names (`entra.signins._all`) are equivalent (confirmed live against the production API on 2026-08-21).
 - The legacy/internal physical names (e.g. `auditazureactivedirectory`, `httpsessioninfo`, `cloudtrail`) map to the qualified names above.
 
 ## 3. Supported SQL Syntax
@@ -27,7 +28,7 @@ Only a single `SELECT` statement, with this overall shape:
 
 ```sql
 SELECT [DISTINCT | ALL] <select_items>
-FROM <table>                       -- single table; UNION allowed only for one specific pair (see §3.7)
+FROM <table>                       -- UNION / UNION ALL across any tables allowed (see §3.7)
 [WHERE  <boolean_expression>]
 [GROUP BY <grouping_elements>]
 [HAVING <boolean_expression>]
@@ -41,7 +42,7 @@ FROM <table>                       -- single table; UNION allowed only for one s
 =  !=  <>  <  <=  >  >=
 AND  OR  NOT
 IS NULL  IS NOT NULL
-IN ( ... )                         -- list literal only; no IN (SELECT ...)
+IN ( ... )                         -- list literal, or a subquery: IN (SELECT ...)
 LIKE 'pattern'                     -- % and _ wildcards
 BETWEEN <lo> AND <hi>
 +  -  *  /  %                      -- arithmetic
@@ -76,11 +77,11 @@ Misc: `ABS`, `CAST`, `TRY_CAST`, `DISTINCT`.
 Validators reject queries containing any of:
 
 - SQL comments — `--` or `/* ... */`
-- `JOIN` of any kind
+- `JOIN` of any kind (confirmed unsupported — use `UNION` or a subquery instead)
 - CTEs / `WITH` clauses
-- Subqueries — anything matching `FROM (SELECT ...)`, `IN (SELECT ...)`, `EXISTS (...)`, etc.
-- `UNION` — except the single allowed pair below
 - DDL/DML: `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `MERGE`, `TRUNCATE`, etc.
+
+**No longer forbidden (confirmed supported live, 2026-08-21):** plain `UNION` across any two tables, `UNION ALL`, and subqueries (`WHERE x IN (SELECT ...)`). See §3.7.
 
 ### 3.6 Required conventions
 
@@ -92,15 +93,21 @@ Validators reject queries containing any of:
 - Use SELECT-list aliases in `ORDER BY`, but **not** in `GROUP BY` or `HAVING` (use the underlying expression there).
 - Bias toward the table's default columns; only `SELECT *` for forensic detail queries.
 
-### 3.7 The single allowed UNION
+### 3.7 UNION and subqueries
 
-A top-level `UNION` is allowed **only** between exactly:
+`UNION` and `UNION ALL` are supported across **any** tables — not
+limited to a single pair. Confirmed live, e.g.:
 
+```sql
+SELECT id.orig_h FROM network.http._all WHERE timestamp > date_add('day', -1, now())
+UNION
+SELECT id.orig_h FROM network.dns._all  WHERE timestamp > date_add('day', -1, now())
 ```
-network.ntlm._all  UNION  network.kerberos._all
-```
 
-Each side must be a plain SELECT from its base table. Any other UNION (nested, more than two terms, other tables) is rejected.
+Subqueries are also supported, e.g. `WHERE id.orig_h IN (SELECT id.orig_h FROM network.dns._all WHERE ...)`.
+
+`JOIN` remains unsupported in all cases — use `UNION` or a subquery
+to correlate across tables instead.
 
 ### 3.8 Time-window patterns
 
@@ -522,6 +529,11 @@ LIMIT 100
 ```
 
 ### 4.9 Microsoft 365 (o365)
+
+> Note: a few examples below query `m365.signins._all` /
+> `m365.directory_audits._all`. These still return results live but
+> are not in the current schema reference — prefer `entra.signins`
+> / `entra.directoryaudits` for new queries (see §2).
 
 Per-user audit trail (all events in last 30 days):
 
