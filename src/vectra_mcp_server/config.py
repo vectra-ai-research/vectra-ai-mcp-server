@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 # Shared validators
 # ---------------------------------------------------------------------------
 
-_SUPPORTED_API_VERSIONS = ["v3", "v3.1", "v3.2", "v3.3", "v3.4"]
+# v3.5 is opt-in, not the default. It documents 12 paths against v3.4's 76 and
+# has no accounts / groups / rules / assignments / health, and only
+# entities/{id} rather than the entities list -- so making it the server-wide
+# default would break most tools. Calls that need a v3.5-only capability pin
+# themselves via _make_request(api_version="v3.5").
+_SUPPORTED_API_VERSIONS = ["v3", "v3.1", "v3.2", "v3.3", "v3.4", "v3.5"]
 _VALID_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 _VALID_LOG_FORMATS = ["json", "text"]
 # Tenant names must be safe for MCP tool name prefixes (alphanumeric + underscore, 1-20 chars)

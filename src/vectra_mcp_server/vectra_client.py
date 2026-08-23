@@ -195,16 +195,29 @@ class VectraClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         data: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Dict[str, Any]] = None
+        json_data: Optional[Dict[str, Any]] = None,
+        api_version: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Make authenticated HTTP request to Vectra API."""
+        """Make authenticated HTTP request to Vectra API.
+
+        Args:
+            api_version: Override the configured API version for this call only,
+                e.g. "v3.5". Used where a capability exists on one version and
+                not another -- v3.5 documents 12 paths against v3.4's 76 and has
+                no accounts/groups/rules/assignments/health, so the server stays
+                on v3.4 by default and pins individual calls forward.
+        """
         await self.rate_limiter.acquire()
-        
+
         # Get access token
         access_token = await self.token_manager.get_access_token()
-        
+
         # Build URL
-        url = urljoin(self.config.api_base_url + "/", endpoint.lstrip("/"))
+        api_base = (
+            self.config.api_base_url if api_version is None
+            else f"{self.config.base_url}/api/{api_version}"
+        )
+        url = urljoin(api_base + "/", endpoint.lstrip("/"))
         
         # Prepare headers
         headers = {
@@ -565,6 +578,90 @@ class VectraClient:
             "PATCH",
             "detections/close/",
             json_data={"detectionIdList": detection_ids, "reason": reason},
+        )
+
+    #: Every value of the v3.5 events `investigation_status` enum. The API
+    #: defaults this filter to "open", so a query that omits it silently returns
+    #: nothing for a detection in any other state.
+    INVESTIGATION_STATUSES = (
+        "open", "acknowledged", "escalated", "paused", "closed", "expired",
+    )
+
+    async def get_detection_events(
+        self,
+        detection_id: int,
+        size: str = "small",
+        investigation_status: Optional[str] = None,
+        change_type: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Fetch the event history for one detection (v3.5 events endpoint).
+
+        GET /api/v3.5/events/detections/ -- an append-only change log. Carries
+        `change_type` and `mitre`, neither of which the detection resource
+        exposes.
+
+        The API's `investigation_status` filter **defaults to "open"**, so
+        omitting it hides every event for a detection that has since been
+        acknowledged, escalated, paused, closed or expired. Since GET
+        /detections does not return `investigation_status` either, a caller has
+        no way to know which value to ask for. So when investigation_status is
+        None this sweeps all six and merges, deduped by event id.
+        """
+        statuses = (
+            [investigation_status] if investigation_status
+            else list(self.INVESTIGATION_STATUSES)
+        )
+
+        merged: Dict[Any, Dict[str, Any]] = {}
+        for status in statuses:
+            params = {
+                "detection_id": detection_id,
+                "size": size,
+                "investigation_status": status,
+                "limit": limit,
+                "ordering": "event_timestamp",
+            }
+            if change_type:
+                params["change_type"] = change_type
+            response = await self._make_request(
+                "GET", "events/detections/", params=params, api_version="v3.5"
+            )
+            for event in response.get("events", []) or []:
+                merged[event.get("id")] = event
+
+        events = sorted(
+            merged.values(), key=lambda e: (e.get("event_timestamp") or "", e.get("id") or 0)
+        )
+        return {
+            "events": events,
+            "count": len(events),
+            "statuses_queried": statuses,
+        }
+
+    async def set_detection_workflow_state(
+        self,
+        detection_ids: list,
+        external_reference_id: Optional[str] = None,
+        investigation_status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Set customer-specified workflow metadata on detections (v3.5).
+
+        PATCH /api/v3.5/detections/ -- sets `external_reference_id` (a reference
+        to an item in an external system, e.g. a ticket) and/or
+        `investigation_status`.
+
+        Note these are write-only from the detection resource's perspective:
+        GET /detections does not return them. Read them back via
+        get_detection_events.
+        """
+        payload: Dict[str, Any] = {"detectionIdList": detection_ids}
+        if external_reference_id is not None:
+            payload["external_reference_id"] = external_reference_id
+        if investigation_status is not None:
+            payload["investigation_status"] = investigation_status
+        return await self._make_request(
+            "PATCH", "detections/", json_data=payload, api_version="v3.5"
         )
 
     async def reopen_detections(self, detection_ids: list) -> Dict[str, Any]:

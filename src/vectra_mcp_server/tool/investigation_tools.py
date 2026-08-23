@@ -47,6 +47,10 @@ class InvestigationMCPTools(BaseMCPTools):
         # Submits a new async query job; returns a fresh request_id each call.
         self._register_tool(self.run_investigation, ADDITIVE_EACH_CALL)
         self._register_tool(self.get_investigation_results, READ_ONLY)
+        # v3.5 events endpoint — lifecycle and MITRE, neither on the detection.
+        self._register_tool(self.get_detection_history, READ_ONLY)
+        # Overwrites customer workflow metadata, not security state.
+        self._register_tool(self.set_detection_workflow_state, ADDITIVE)
 
     async def list_assignments(
             self,
@@ -331,6 +335,99 @@ class InvestigationMCPTools(BaseMCPTools):
             return json.dumps(result, indent=2)
         except Exception as e:
             raise Exception(f"Failed to close detections {detection_ids}: {str(e)}")
+
+    async def get_detection_history(
+        self,
+        detection_id: Annotated[
+            int,
+            Field(description="ID of the detection to retrieve the event history for.", ge=1)
+        ],
+        change_type: Annotated[
+            Literal["new", "append", "triage", "update", "adjust", "state"] | None,
+            Field(description=(
+                "Restrict to one kind of change. 'new' = first fired, 'append' = "
+                "recurred with new activity, 'triage' = triaged, 'adjust' = score or "
+                "metadata changed, 'state' = state changed. Leave unset for the full "
+                "history."
+            ))
+        ] = None,
+    ) -> str:
+        """
+        Get the full change history of a single detection — when it first fired,
+        each time it recurred, and each time it was triaged, rescored or had
+        metadata changed.
+
+        Two things here are on no other endpoint: `change_type`, and `mitre`
+        technique IDs. Note the detection's own `grouped_details` covers
+        recurrence but not `adjust`/`triage` events, so it is not a substitute.
+
+        Answers "has this been recurring, and has anyone touched it?" — the
+        question a daily-recurring detection raises.
+
+        Scoped to one detection deliberately. Each event repeats the detection's
+        context, so a queue-wide history query would be enormous.
+
+        Returns:
+            str: JSON with the merged event list, oldest first, plus the
+                investigation statuses that were queried.
+        """
+        try:
+            result = await self.client.get_detection_events(
+                detection_id=detection_id, change_type=change_type
+            )
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            raise Exception(f"Failed to get history for detection {detection_id}: {str(e)}")
+
+    async def set_detection_workflow_state(
+        self,
+        detection_ids: Annotated[
+            List[int],
+            Field(description="IDs of the detections to update. Pass a single-element list for one.")
+        ],
+        external_reference_id: Annotated[
+            str | None,
+            Field(description=(
+                "Reference to an item in an external system — typically the ticket "
+                "that owns this work, e.g. 'TICKET-12345'. This, not the Vectra "
+                "assignment, is where external ownership belongs."
+            ))
+        ] = None,
+        investigation_status: Annotated[
+            Literal["open", "acknowledged", "escalated", "paused", "closed", "expired"] | None,
+            Field(description="Workflow state for automation. Leave unset to change only the external reference.")
+        ] = None,
+    ) -> str:
+        """
+        Set the external reference and/or investigation status on detections.
+
+        This is how a detection is linked to the ticket that owns it, and how its
+        position in a workflow is recorded. Distinct from two other things:
+        `create_assignment` acknowledges a detection and starts the platform's
+        metrics timers; `close_detections` ends its life in the queue. This tool
+        does neither — it annotates.
+
+        Both fields are **write-only from the detection resource**: GET
+        /detections will not return them. Read them back with
+        get_detection_history.
+
+        Returns:
+            str: JSON confirmation from the API, or an error message.
+        """
+        if not detection_ids:
+            return "No detection IDs provided."
+        if external_reference_id is None and investigation_status is None:
+            return "Nothing to set — provide external_reference_id, investigation_status, or both."
+
+        try:
+            result = await self.client.set_detection_workflow_state(
+                detection_ids=detection_ids,
+                external_reference_id=external_reference_id,
+                investigation_status=investigation_status,
+            )
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            raise Exception(f"Failed to set workflow state on {detection_ids}: {str(e)}")
 
     async def reopen_detections(
         self,

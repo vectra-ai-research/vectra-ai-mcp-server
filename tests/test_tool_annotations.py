@@ -39,6 +39,9 @@ EXPECTED_MUTATING = {
     "mark_detection_fixed",
     "reopen_detections",
     "run_investigation",
+    # Writes external_reference_id / investigation_status — customer workflow
+    # metadata, not security state. Mutating, but not destructive.
+    "set_detection_workflow_state",
 }
 
 # Of those, the ones that remove, close, or suppress existing state.
