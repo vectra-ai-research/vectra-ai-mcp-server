@@ -6,7 +6,7 @@ import json
 import base64
 
 from ..utils.validators import validate_date_range
-from .base import BaseMCPTools
+from .base import READ_ONLY, BaseMCPTools
 
 
 class DetectionMCPTools(BaseMCPTools):
@@ -14,14 +14,14 @@ class DetectionMCPTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all detection tools with the MCP server."""
-        self._register_tool(self.list_detection_ids)
-        self._register_tool(self.list_detections_with_basic_info)
-        self._register_tool(self.list_detections_with_details)
-        self._register_tool(self.list_entity_detections)
-        self._register_tool(self.get_detection_count)
-        self._register_tool(self.get_detection_details)
-        self._register_tool(self.get_detection_summary)
-        self._register_tool(self.get_detection_pcap)
+        self._register_tool(self.list_detection_ids, READ_ONLY)
+        self._register_tool(self.list_detections_with_basic_info, READ_ONLY)
+        self._register_tool(self.list_detections_with_details, READ_ONLY)
+        self._register_tool(self.list_entity_detections, READ_ONLY)
+        self._register_tool(self.get_detection_count, READ_ONLY)
+        self._register_tool(self.get_detection_details, READ_ONLY)
+        self._register_tool(self.get_detection_summary, READ_ONLY)
+        self._register_tool(self.get_detection_pcap, READ_ONLY)
     
     async def get_detection_details(
         self,

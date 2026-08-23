@@ -2,7 +2,7 @@
 
 import json
 
-from .base import BaseMCPTools
+from .base import READ_ONLY, BaseMCPTools
 
 
 class ResponseMCPTools(BaseMCPTools):
@@ -10,7 +10,7 @@ class ResponseMCPTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all response tools with the MCP server."""
-        self._register_tool(self.list_lockdown_entities)
+        self._register_tool(self.list_lockdown_entities, READ_ONLY)
 
     async def list_lockdown_entities(
         self,

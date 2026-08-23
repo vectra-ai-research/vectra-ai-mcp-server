@@ -3,6 +3,57 @@
 import functools
 from typing import Optional
 
+from mcp.types import ToolAnnotations
+
+
+# ---------------------------------------------------------------------------
+# Tool behaviour annotations
+#
+# Every registered tool must declare one of the constants below. Annotations
+# are advisory hints (per the MCP spec) that let a host tell a safe read apart
+# from a call that changes tenant state. For a client driving this server
+# without any SOC playbook loaded, they are the *only* such signal available,
+# so an unannotated mutating tool is indistinguishable from a query.
+#
+# ``openWorldHint`` is False throughout: every tool addresses one Vectra
+# tenant's own data — a closed, enumerable domain — rather than an open-ended
+# external world such as a web search.
+# ---------------------------------------------------------------------------
+
+#: Pure query. Changes nothing; safe to call repeatedly.
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
+#: Adds state without removing or overwriting any. Repeating leaves the same
+#: end state (e.g. appending a member that is already present).
+ADDITIVE = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
+#: Adds state, and every call creates a distinct new object (a new note, a new
+#: assignment, a new query job). Repeating is not a no-op.
+ADDITIVE_EACH_CALL = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=False,
+    openWorldHint=False,
+)
+
+#: Removes, closes, or suppresses existing state. A host should treat these as
+#: requiring explicit human approval.
+DESTRUCTIVE = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
 
 class BaseMCPTools:
     """Base class providing prefixed tool registration for multi-tenancy."""
@@ -21,14 +72,21 @@ class BaseMCPTools:
         self.prefix = prefix
         self.tenant_label = tenant_label
 
-    def _register_tool(self, method):
-        """Register a tool with optional tenant prefix on the name and description.
+    def _register_tool(self, method, annotations: ToolAnnotations):
+        """Register a tool with behaviour annotations and an optional tenant prefix.
 
         In single-tenant mode (prefix=None), this behaves identically to
-        ``self.vectra_mcp.tool()(method)`` -- no name or description override.
+        ``self.vectra_mcp.tool()(method)`` apart from attaching ``annotations``
+        -- no name or description override.
 
         In multi-tenant mode, the tool name becomes ``{prefix}_{method.__name__}``
         and the first line of the docstring is prefixed with ``[{tenant_label}]``.
+
+        Args:
+            method: The bound coroutine to expose as a tool.
+            annotations: One of ``READ_ONLY``, ``ADDITIVE``,
+                ``ADDITIVE_EACH_CALL``, or ``DESTRUCTIVE``. Required -- a new
+                tool cannot be added without classifying its side effects.
         """
         if self.prefix:
             name = f"{self.prefix}_{method.__name__}"
@@ -44,10 +102,10 @@ class BaseMCPTools:
             async def wrapper(*args, **kwargs):
                 return await method(*args, **kwargs)
 
-            kwargs = {"name": name}
+            kwargs = {"name": name, "annotations": annotations}
             if description:
                 kwargs["description"] = description
             self.vectra_mcp.tool(**kwargs)(wrapper)
         else:
             # Single-tenant: register as-is (backward compatible)
-            self.vectra_mcp.tool()(method)
+            self.vectra_mcp.tool(annotations=annotations)(method)

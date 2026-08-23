@@ -7,7 +7,12 @@ import json
 
 from ..utils.logging import get_logger
 from ..utils.validators import validate_date_range
-from .base import BaseMCPTools
+from .base import (
+    ADDITIVE_EACH_CALL,
+    DESTRUCTIVE,
+    READ_ONLY,
+    BaseMCPTools,
+)
 
 logger = get_logger(__name__)
 
@@ -21,16 +26,21 @@ class InvestigationMCPTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all investigation tools with the MCP server."""
-        self._register_tool(self.create_assignment)
-        self._register_tool(self.list_assignments)
-        self._register_tool(self.list_assignments_for_user)
-        self._register_tool(self.delete_assignment)
-        self._register_tool(self.get_assignment_detail_by_id)
-        self._register_tool(self.get_assignment_for_entity)
-        self._register_tool(self.create_entity_note)
-        self._register_tool(self.mark_detection_fixed)
-        self._register_tool(self.run_investigation)
-        self._register_tool(self.get_investigation_results)
+        # Each call creates a new assignment object.
+        self._register_tool(self.create_assignment, ADDITIVE_EACH_CALL)
+        self._register_tool(self.list_assignments, READ_ONLY)
+        self._register_tool(self.list_assignments_for_user, READ_ONLY)
+        # Removes an existing assignment.
+        self._register_tool(self.delete_assignment, DESTRUCTIVE)
+        self._register_tool(self.get_assignment_detail_by_id, READ_ONLY)
+        self._register_tool(self.get_assignment_for_entity, READ_ONLY)
+        # Each call appends a new note.
+        self._register_tool(self.create_entity_note, ADDITIVE_EACH_CALL)
+        # Suppresses detections from the active queue and from entity scoring.
+        self._register_tool(self.mark_detection_fixed, DESTRUCTIVE)
+        # Submits a new async query job; returns a fresh request_id each call.
+        self._register_tool(self.run_investigation, ADDITIVE_EACH_CALL)
+        self._register_tool(self.get_investigation_results, READ_ONLY)
 
     async def list_assignments(
             self,

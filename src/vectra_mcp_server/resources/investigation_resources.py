@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from ..tool.base import BaseMCPTools
+from ..tool.base import READ_ONLY, BaseMCPTools
 
 
 _RESOURCES_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,8 +34,8 @@ class InvestigationResourceTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all investigation resource tools with the MCP server."""
-        self._register_tool(self.get_investigation_sql_reference)
-        self._register_tool(self.get_investigation_schema)
+        self._register_tool(self.get_investigation_sql_reference, READ_ONLY)
+        self._register_tool(self.get_investigation_schema, READ_ONLY)
 
     async def get_investigation_sql_reference(self) -> str:
         """

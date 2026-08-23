@@ -4,7 +4,7 @@ from typing import Literal, Annotated
 from pydantic import Field, IPvAnyAddress
 import json
 
-from .base import BaseMCPTools
+from .base import READ_ONLY, BaseMCPTools
 
 
 class EntityMCPTools(BaseMCPTools):
@@ -12,11 +12,11 @@ class EntityMCPTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all entity tools with the MCP server."""
-        self._register_tool(self.list_entities)
-        self._register_tool(self.lookup_entity_info_by_name)
-        self._register_tool(self.lookup_host_by_ip)
-        self._register_tool(self.get_host_details)
-        self._register_tool(self.get_account_details)
+        self._register_tool(self.list_entities, READ_ONLY)
+        self._register_tool(self.lookup_entity_info_by_name, READ_ONLY)
+        self._register_tool(self.lookup_host_by_ip, READ_ONLY)
+        self._register_tool(self.get_host_details, READ_ONLY)
+        self._register_tool(self.get_account_details, READ_ONLY)
     
     async def list_entities(
         self,

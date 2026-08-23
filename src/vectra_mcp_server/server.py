@@ -15,6 +15,7 @@ from .vectra_client import VectraClient
 from .config import load_configuration, ServerConfiguration
 from .utils.logging import setup_logging, get_logger, configure_debug_logging
 
+from .tool.base import READ_ONLY
 from .tool.detection_tools import DetectionMCPTools
 from .tool.entity_tools import EntityMCPTools
 from .tool.investigation_tools import InvestigationMCPTools
@@ -124,9 +125,12 @@ class VectraMCPServer:
             for t in self.config.tenants
         ]
 
+        # NOTE: registered directly rather than through BaseMCPTools._register_tool,
+        # so its annotations must be set here.
         @self.server.tool(
             name="list_tenants",
-            description="List all configured Vectra tenants and their tool name prefixes."
+            description="List all configured Vectra tenants and their tool name prefixes.",
+            annotations=READ_ONLY,
         )
         async def list_tenants() -> str:
             """List all configured Vectra tenants and their tool name prefixes."""

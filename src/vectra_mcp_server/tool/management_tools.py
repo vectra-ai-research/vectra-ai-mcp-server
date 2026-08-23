@@ -5,7 +5,7 @@ from pydantic import Field
 import json
 
 from ..utils.validators import validate_date_range
-from .base import BaseMCPTools
+from .base import READ_ONLY, BaseMCPTools
 
 
 class ManagementMCPTools(BaseMCPTools):
@@ -13,8 +13,8 @@ class ManagementMCPTools(BaseMCPTools):
 
     def register_tools(self):
         """Register all platform management tools with the MCP server."""
-        self._register_tool(self.list_platform_users)
-        self._register_tool(self.get_platform_health)
+        self._register_tool(self.list_platform_users, READ_ONLY)
+        self._register_tool(self.get_platform_health, READ_ONLY)
 
     async def get_platform_health(
         self,
