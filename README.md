@@ -327,7 +327,21 @@ cp .env.example .env
 ```
 Then edit the `.env` file with your actual Vectra AI Platform credentials.
 
-2. **Run with pre-built image:**
+2. **Choose a tag.**
+
+| Tag | Moves when | Use for |
+|---|---|---|
+| `:0.3.2` | never | **production** — pin to an exact release |
+| `:0.3` | a new 0.3.x release | production, floating within a minor line |
+| `:latest` | a new release is tagged | evaluation, or when you want the newest release |
+| `:main` | every push to `main` | tracking unreleased work; expect breakage |
+
+Examples below use `:latest`. **For production, replace it with an exact
+version.** `:latest` tracked the `main` branch until 0.4.0, so any merge landed
+in deployments on the next pull; it now moves only on a tagged release, but a
+pinned tag is still the only one that never changes under you.
+
+3. **Run with pre-built image:**
 
 #### Streamable HTTP Transport (Recommended for Production)
 ```bash
@@ -365,7 +379,7 @@ docker run -d \
   ghcr.io/vectra-ai-research/vectra-ai-mcp-server:latest
 ```
 
-3. **Or use Docker Compose (Alternative):**
+4. **Or use Docker Compose (Alternative):**
 
 Create a `docker-compose.yml` file:
 ```yaml
