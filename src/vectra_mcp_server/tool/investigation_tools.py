@@ -39,7 +39,15 @@ class InvestigationMCPTools(BaseMCPTools):
         # Suppresses detections from the active queue and from entity scoring.
         self._register_tool(self.mark_detection_fixed, DESTRUCTIVE)
         # Submits a new async query job; returns a fresh request_id each call.
-        self._register_tool(self.run_investigation, ADDITIVE_EACH_CALL)
+        # A SELECT does not change tenant state. The request object it creates
+        # is the API's own bookkeeping, not something the caller mutated, and
+        # readOnlyHint asks about the environment rather than about server-side
+        # allocation. Annotating it additive made every client that gates
+        # non-read-only tools behind confirmation prompt once per query, which
+        # a TI hunt sweep fires a dozen times in a row — and left the pair
+        # inconsistent, since get_investigation_results was already read-only.
+        # Rate limiting belongs in the client's limiter, not in an approval loop.
+        self._register_tool(self.run_investigation, READ_ONLY)
         self._register_tool(self.get_investigation_results, READ_ONLY)
 
     async def list_assignments(
