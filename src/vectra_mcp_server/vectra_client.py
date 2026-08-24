@@ -10,8 +10,25 @@ import base64
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from . import __version__
 from .config import VectraConfig
 from .utils.logging import get_logger
+
+#: Sent on every request to the Vectra API. Tenant-side logging groups calls by
+#: this string, so it is the only way to tell which server version a customer is
+#: running.
+#:
+#: It was hardcoded `VectraMCPServer/1.0.0` in two places and never matched a
+#: release — the package was at 0.3.2 while the header still said 1.0.0. Binding
+#: it to __version__ means it cannot drift again, and gives per-release adoption
+#: rather than a single before/after split.
+#:
+#: Two consequences worth knowing when reading the stats:
+#:   * `1.0.0` is now a legacy sentinel. No real release ever emitted it, so any
+#:     other value means a post-2026-08 build.
+#:   * A source checkout with no install reports `0.0.0+unknown` (the fallback in
+#:     __init__.py), which usefully separates development traffic from customers.
+USER_AGENT = f"VectraMCPServer/{__version__}"
 
 
 class VectraAPIError(Exception):
@@ -223,7 +240,7 @@ class VectraClient:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
-            "User-Agent": f"VectraMCPServer/1.0.0"
+            "User-Agent": USER_AGENT,
         }
         
         # Log request
@@ -1073,7 +1090,7 @@ class VectraClient:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "*/*",
-            "User-Agent": "VectraMCPServer/1.0.0",
+            "User-Agent": USER_AGENT,
         }
 
         self.logger.debug("Downloading PCAP for detection %s", detection_id)
