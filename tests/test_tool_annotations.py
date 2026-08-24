@@ -38,7 +38,6 @@ EXPECTED_MUTATING = {
     "delete_assignment",
     "mark_detection_fixed",
     "reopen_detections",
-    "run_investigation",
     # Writes external_reference_id / investigation_status — customer workflow
     # metadata, not security state. Mutating, but not destructive.
     "set_detection_workflow_state",
@@ -103,12 +102,20 @@ def test_read_only_tools_are_idempotent_and_closed_world(tools):
             assert tool.annotations.openWorldHint is False, f"{name}"
 
 
-def test_run_investigation_is_not_read_only(tools):
-    """It POSTs a new async query job and returns a fresh request_id each call."""
-    ann = tools["run_investigation"].annotations
-    assert ann.readOnlyHint is False
-    assert ann.destructiveHint is False
-    assert ann.idempotentHint is False
+def test_the_investigation_pair_is_read_only(tools):
+    """Submitting a SELECT and fetching its results are both read-only.
+
+    run_investigation POSTs an async job and returns a fresh request_id, so it
+    is not idempotent in the literal sense — but idempotentHint is only
+    meaningful when readOnlyHint is false, and a query that reads does not
+    change tenant state. Annotating it as mutating made clients that gate
+    non-read-only tools prompt on every query in a hunt sweep, and disagreed
+    with get_investigation_results, which reads the same job back.
+    """
+    for name in ("run_investigation", "get_investigation_results"):
+        ann = tools[name].annotations
+        assert ann.readOnlyHint is True, name
+        assert ann.destructiveHint is not True, name
 
 
 def test_annotations_survive_multi_tenant_registration():
