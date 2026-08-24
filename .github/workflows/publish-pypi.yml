@@ -1,11 +1,28 @@
 name: Publish to PyPI
 
-# Publishes the package to PyPI. Triggers:
-#   - push to main: if pyproject.toml version doesn't have a matching v<version>
-#     tag yet, the workflow creates the tag and publishes the new release.
-#   - push of a v* tag (manual `git tag` + `git push --tags`): publishes the
-#     tagged commit, verifying tag and pyproject.toml versions match.
-#   - manual workflow_dispatch: lets you republish to PyPI or push to TestPyPI.
+# Publishes the package to PyPI. Releasing is a deliberate act: push a tag.
+#
+#     git tag -a v0.4.0 -m "Release v0.4.0"
+#     git push origin v0.4.0
+#
+# Triggers:
+#   - push of a v* tag: publishes that commit, after checking the tag and
+#     pyproject.toml versions agree.
+#   - manual workflow_dispatch: republish to PyPI, or push to TestPyPI.
+#
+# Pushing to main does NOT publish, and this workflow no longer runs on it.
+#
+# It used to. A push to main whose pyproject version had no matching tag would
+# create the tag and publish — which made merging to main a release, and made
+# `main` unusable as an integration branch. Worse, the tag was created with
+# GITHUB_TOKEN, and GitHub does not trigger workflows from GITHUB_TOKEN-authored
+# events (it prevents recursion). So that path published to PyPI while
+# docker.yml never fired: no :latest, no :<version> image, and no error anywhere
+# to say so. With Docker being the dominant deployment shape, a "release" could
+# reach almost nobody.
+#
+# A human-pushed tag triggers this workflow and docker.yml together, so both
+# channels move on one action or neither does.
 #
 # Uses PyPI Trusted Publishing (OIDC), so no API token needs to be stored as a
 # repository secret.
@@ -21,8 +38,6 @@ name: Publish to PyPI
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -47,7 +62,6 @@ jobs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
       should_publish: ${{ steps.compute.outputs.should_publish }}
-      should_tag: ${{ steps.compute.outputs.should_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,26 +78,22 @@ jobs:
           echo "Expected tag:                    ${TAG}"
 
           SHOULD_PUBLISH=false
-          SHOULD_TAG=false
 
           case "${GITHUB_EVENT_NAME}" in
             push)
-              if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-                TAG_VERSION="${GITHUB_REF_NAME#v}"
-                if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
-                  echo "::error::Tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
-                  exit 1
-                fi
-                SHOULD_PUBLISH=true
-              elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-                if git rev-parse --quiet --verify "refs/tags/${TAG}" >/dev/null; then
-                  echo "Tag ${TAG} already exists -- nothing to publish."
-                else
-                  echo "Tag ${TAG} does not exist yet -- will create it and publish."
-                  SHOULD_PUBLISH=true
-                  SHOULD_TAG=true
-                fi
+              # The trigger is restricted to `tags: v*`, so a push event can only
+              # be a tag. Fail loudly rather than silently doing nothing if that
+              # ever stops being true.
+              if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+                echo "::error::Expected a v* tag, got ${GITHUB_REF}. Releases are made by pushing a tag; pushing to a branch must not publish."
+                exit 1
               fi
+              TAG_VERSION="${GITHUB_REF_NAME#v}"
+              if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
+                echo "::error::Tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
+                exit 1
+              fi
+              SHOULD_PUBLISH=true
               ;;
             workflow_dispatch)
               SHOULD_PUBLISH=true
@@ -91,45 +101,17 @@ jobs:
           esac
 
           echo "should_publish=${SHOULD_PUBLISH}"
-          echo "should_tag=${SHOULD_TAG}"
 
           {
             echo "version=${VERSION}"
             echo "tag=${TAG}"
             echo "should_publish=${SHOULD_PUBLISH}"
-            echo "should_tag=${SHOULD_TAG}"
           } >> "${GITHUB_OUTPUT}"
-
-  tag:
-    name: Create release tag from main
-    needs: prepare
-    if: needs.prepare.outputs.should_tag == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create and push tag
-        env:
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "Release ${TAG}"
-          git push origin "${TAG}"
 
   build:
     name: Build sdist and wheel
-    needs: [prepare, tag]
-    # Run when we want to publish and the tag job either succeeded (main push)
-    # or was skipped (tag push / workflow_dispatch).
-    if: |
-      always() &&
-      needs.prepare.outputs.should_publish == 'true' &&
-      (needs.tag.result == 'success' || needs.tag.result == 'skipped')
+    needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
