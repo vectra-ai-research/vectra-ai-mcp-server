@@ -50,7 +50,13 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            # `latest` follows RELEASES, not the default branch. It was
+            # enable={{is_default_branch}}, so every push to main moved it — and
+            # since the README only ever showed :latest, that made any merge to
+            # main an immediate release to every Docker deployment, with no
+            # version bump involved. PyPI was already gated this way; this makes
+            # the two channels agree, so a tag is the single release action.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build Docker image
         uses: docker/build-push-action@v5
@@ -168,7 +174,20 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            # See the note in the build-and-test job: `latest` tracks tags, not
+            # main. This is the job that actually pushes, so this is the line
+            # that decides what users receive.
+            #
+            # RELEASE PROCEDURE — push the tag by hand:
+            #     git tag -a v0.4.0 -m "Release v0.4.0" && git push origin v0.4.0
+            #
+            # Do NOT rely on publish-pypi.yml's auto-tag-on-main-push path for a
+            # Docker release. That job creates the tag with GITHUB_TOKEN, and
+            # GitHub does not trigger workflows from GITHUB_TOKEN-authored events
+            # (it prevents recursion). The tag appears, PyPI publishes, and this
+            # workflow never runs — so no :latest and no :<version> image. A
+            # human-pushed tag triggers both.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build and push Docker image
         id: push
