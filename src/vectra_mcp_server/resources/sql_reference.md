@@ -69,7 +69,23 @@ Misc: `ABS`, `CAST`, `TRY_CAST`, `DISTINCT`.
 - `CAST(expr AS TYPE)` and `TRY_CAST(expr AS TYPE)` — supported types include `INTEGER`, `DOUBLE`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `VARCHAR`, `IPADDRESS`
 - Dotted field access on nested objects: `id.orig_h`, `status.error_code`, `device_detail.browser`
 - Array element access via `array_agg`, `CONTAINS(array_col, value)`
-- Quoted column aliases: `COUNT(*) AS "failure_count"`
+- Column aliases as **bare, unquoted identifiers**: `COUNT(*) AS failure_count`,
+  then `ORDER BY failure_count DESC`. `ORDER BY 2 DESC` (column position) also
+  works.
+
+  Never quote an alias. `AS 'failure_count'` is a hard `SYNTAX_ERROR`, and
+  `ORDER BY 'failure_count'` is worse: the dialect accepts it as an ordering on
+  a string *constant*, so the rows come back unsorted with no error, and `LIMIT`
+  then takes an arbitrary slice. A top-N query written that way succeeds and is
+  silently not a top-N. Probed live 2026-08-24: `ORDER BY 'n' DESC LIMIT 10`
+  over `aws.cloudtrail._all` returned counts ordered 17, 2, 13, 52, 14, 26,
+  169, 1, 1, 18.
+
+  Double quotes are the correct Trino spelling but cannot be used here:
+  `run_investigation` folds every `"` to `'` (models reach for double quotes on
+  string literals, where this dialect rejects them), which manufactures exactly
+  the two broken forms above. The server repairs whole-term aliases after that
+  fold, but write them bare and the repair never has to fire.
 
 ### 3.5 ABSOLUTELY FORBIDDEN
 
@@ -157,7 +173,7 @@ Hosts with many failed Kerberos pre-auths (brute force / sprays):
 SELECT
     id.orig_h AS source_ip,
     client,
-    count(*) AS "failure_count"
+    count(*) AS failure_count
 FROM network.kerberos._all
 WHERE request_type = 'AS'
   AND LOWER(service) LIKE '%krbtgt%'
@@ -165,7 +181,7 @@ WHERE request_type = 'AS'
   AND timestamp BETWEEN date_add('day', -7, now()) AND now()
 GROUP BY id.orig_h, client
 HAVING count(*) > 20
-ORDER BY "failure_count" DESC
+ORDER BY failure_count DESC
 LIMIT 100
 ```
 
@@ -176,14 +192,14 @@ SELECT
     id.orig_h AS source_ip,
     client,
     service,
-    count(*) AS "auth_count"
+    count(*) AS auth_count
 FROM network.kerberos._all
 WHERE success = TRUE
   AND DATE_DIFF('hour', DATE(timestamp), timestamp) BETWEEN 0 AND 5
   AND timestamp BETWEEN date_add('day', -7, now()) AND now()
 GROUP BY id.orig_h, client, service
 HAVING count(*) > 5
-ORDER BY "auth_count" DESC
+ORDER BY auth_count DESC
 LIMIT 100
 ```
 
@@ -195,13 +211,13 @@ SELECT
     orig_hostname,
     username,
     domain,
-    COUNT(*) AS "failure_count"
+    COUNT(*) AS failure_count
 FROM network.ntlm._all
 WHERE success = FALSE
   AND timestamp BETWEEN date_add('day', -1, now()) AND now()
 GROUP BY id.orig_h, orig_hostname, username, domain
 HAVING COUNT(*) > 5
-ORDER BY "failure_count" DESC
+ORDER BY failure_count DESC
 LIMIT 100
 ```
 

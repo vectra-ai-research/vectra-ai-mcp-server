@@ -1,6 +1,7 @@
 """MCP tools for security investigations."""
 
 import asyncio
+import re
 from typing import Literal, List, Annotated
 from pydantic import Field
 import json
@@ -20,6 +21,45 @@ logger = get_logger(__name__)
 # Hard timeout for investigation API calls (seconds).
 # Prevents a slow/hanging Vectra API from blocking the entire MCP server.
 _INVESTIGATION_TIMEOUT = 20
+
+#: A token safe to emit as an unquoted SQL identifier.
+_BARE_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+
+
+def unquote_identifier_aliases(query: str) -> str:
+    """Turn single-quoted aliases into bare identifiers.
+
+    The dialect rejects ``AS 'x'`` outright with SYNTAX_ERROR. Far worse, it
+    *accepts* ``ORDER BY 'x'`` — as an ordering on a string constant, which
+    sorts by nothing. Combined with LIMIT that returns an arbitrary slice, so
+    a "top 10" query built this way succeeds and is silently not a top 10.
+    Verified live: ``ORDER BY 'n' DESC LIMIT 10`` returned counts in the order
+    17, 2, 13, 52, 14, 26, 169, 1, 1, 18.
+
+    Double quotes are the correct Trino spelling, but they cannot survive the
+    sanitiser: models routinely use them for string literals, where they are
+    invalid, so every ``"`` is folded to ``'``. That fold is what manufactures
+    both broken forms. This undoes it for the two positions where an
+    identifier — never a literal — is what was meant.
+
+    Only whole terms are unquoted, so a genuine literal inside an ORDER BY
+    expression (``ORDER BY CASE WHEN x = 'a' THEN 1 END``) is left alone.
+    """
+    query = re.sub(rf"\bAS\s+'({_BARE_IDENT})'", r"AS \1", query, flags=re.I)
+
+    def _unquote_terms(m: re.Match) -> str:
+        terms = [
+            re.sub(rf"^(\s*)'({_BARE_IDENT})'(\s+(?:ASC|DESC))?(\s*)$",
+                   r"\1\2\3\4", term, flags=re.I)
+            for term in m.group(2).split(",")
+        ]
+        return m.group(1) + ",".join(terms)
+
+    return re.sub(
+        r"\b((?:ORDER|GROUP)\s+BY\s+)(.*?)"
+        r"(?=\s+(?:LIMIT|HAVING|ORDER|OFFSET|UNION)\b|$)",
+        _unquote_terms, query, flags=re.I,
+    )
 
 
 class InvestigationMCPTools(BaseMCPTools):
@@ -486,10 +526,16 @@ class InvestigationMCPTools(BaseMCPTools):
                 "Must be a SELECT statement with a LIMIT clause and a timestamp filter. "
                 "CRITICAL FORMATTING RULES: "
                 "1) The query MUST be a single line with NO line breaks (no \\n, no newlines). "
-                "2) NEVER use double quotes anywhere in the query. Use single quotes for "
-                "string literals AND for column aliases (e.g. AS 'failure_count' not AS \"failure_count\"). "
-                "3) NEVER use escaped quotes (no \\\" or \\\\'). "
-                "Example: SELECT id.orig_h, count(*) AS 'failure_count' FROM network.kerberos._all WHERE timestamp BETWEEN date_add('day', -7, now()) AND now() GROUP BY id.orig_h ORDER BY 'failure_count' DESC LIMIT 100 "
+                "2) NEVER use double quotes anywhere in the query. Single quotes are for "
+                "string literals ONLY. "
+                "3) Column aliases MUST be bare identifiers with no quotes of any kind: "
+                "write AS failure_count, and ORDER BY failure_count. Never AS 'failure_count' — "
+                "that is a syntax error — and never ORDER BY 'failure_count', which is accepted "
+                "as an ordering on a string constant and silently returns unsorted rows, so a "
+                "top-N query comes back plausible and wrong. ORDER BY 2 (a column position) "
+                "also works. "
+                "4) NEVER use escaped quotes (no \\\" or \\\\'). "
+                "Example: SELECT id.orig_h, count(*) AS failure_count FROM network.kerberos._all WHERE timestamp BETWEEN date_add('day', -7, now()) AND now() GROUP BY id.orig_h ORDER BY failure_count DESC LIMIT 100 "
                 "IMPORTANT: Before calling this tool, you MUST first call "
                 "get_investigation_sql_reference to learn the supported SQL syntax, "
                 "and get_investigation_schema with the relevant data_source to learn "
@@ -498,17 +544,19 @@ class InvestigationMCPTools(BaseMCPTools):
         ],
     ) -> str:
         """
-        Submit an investigation SQL query and return the request_id. This tool returns immediately — the query runs asynchronously. Use get_investigation_results with the returned request_id to fetch results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first. The query MUST be a single line (no newlines), MUST use single quotes only (no double quotes), and MUST NOT contain escaped quotes.
+        Submit an investigation SQL query and return the request_id. This tool returns immediately — the query runs asynchronously. Use get_investigation_results with the returned request_id to fetch results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first. The query MUST be a single line (no newlines), MUST use single quotes for string literals only (no double quotes anywhere), MUST write column aliases as bare unquoted identifiers (AS failure_count, ORDER BY failure_count), and MUST NOT contain escaped quotes.
 
         Returns:
             str: JSON with request_id and searchable_range. Use request_id with get_investigation_results.
         """
-        # Sanitize: collapse newlines to spaces, strip double quotes from
-        # column aliases (replace with single quotes or remove), and remove
-        # any backslash-escaped quotes the LLM may have introduced.
+        # Sanitize: collapse newlines to spaces, remove any backslash-escaped
+        # quotes the LLM may have introduced, fold double quotes to single
+        # (models use them for string literals, where they are invalid here),
+        # then repair the aliases that fold breaks.
         query = " ".join(query.split())
         query = query.replace('\\"', '"').replace("\\'", "'")
         query = query.replace('"', "'")
+        query = unquote_identifier_aliases(query)
 
         from ..vectra_client import VectraAPIError
 

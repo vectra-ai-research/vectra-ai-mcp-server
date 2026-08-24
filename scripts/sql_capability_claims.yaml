@@ -17,7 +17,7 @@
 meta:
   reference: src/vectra_mcp_server/resources/sql_reference.md
   # Bump when a claim is added, changed, or retired.
-  revision: 2
+  revision: 3
   # Set only by a run where every claim held — no broken, no newly permitted,
   # no indeterminate. Two array claims currently time out, so this stays null
   # until they can reach a verdict.
@@ -130,6 +130,69 @@ claims:
       SELECT timestamp FROM network.dns._all
       WHERE timestamp > date_add('hour', -1, now())
         AND ANY_MATCH(answers, a -> UPPER(a) = '1.1.1.1') LIMIT 1
+    expect: success
+
+  - id: lower-on-struct
+    claim: LOWER() on a bare struct is rejected
+    section: "3.3"
+    why: >-
+      The CloudTrail recipe shipped LOWER(vectra.entity.resolved_identity) for
+      months on a documented-VARCHAR claim that was wrong — the field is a
+      struct with eight leaves. Same class as contains-upper-array: these
+      functions take varchar, so a composite argument has no signature. If this
+      ever stops holding, the validator's scalar-fn-on-composite rule can relax.
+    query: >-
+      SELECT timestamp FROM aws.cloudtrail._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND LOWER(vectra.entity.resolved_identity) LIKE LOWER('%x%') LIMIT 1
+    expect: error
+    error_name: FUNCTION_NOT_FOUND
+
+  # ---------------------------------------------------------------
+  # Column aliases
+  # ---------------------------------------------------------------
+  - id: alias-single-quoted-rejected
+    claim: A single-quoted column alias is a syntax error
+    section: "3.4"
+    why: >-
+      sql_reference.md documented AS "failure_count" and run_investigation's own
+      description mandated AS 'failure_count'. The server folds every double
+      quote to a single quote, so both spellings arrived as the rejected form and
+      every documented top-N example failed. Bare identifiers are the only form
+      that survives the fold; unquote_identifier_aliases() now repairs the rest.
+    query: >-
+      SELECT count(*) AS 'n' FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now()) LIMIT 1
+    expect: error
+    error_name: SYNTAX_ERROR
+
+  - id: alias-bare-accepted
+    claim: A bare column alias is accepted and usable in ORDER BY
+    section: "3.4"
+    query: >-
+      SELECT query, count(*) AS n FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+      GROUP BY query ORDER BY n DESC LIMIT 1
+    expect: success
+
+  - id: order-by-quoted-is-silent
+    claim: ORDER BY on a quoted token is accepted — and orders by nothing
+    section: "3.4"
+    why: >-
+      THE PROBE CANNOT CATCH THIS ONE. Expect: success is recorded because the
+      query genuinely succeeds; what it does not do is sort. Probed live
+      2026-08-24 against aws.cloudtrail._all, ORDER BY 'n' DESC LIMIT 10 returned
+      counts in the order 17, 2, 13, 52, 14, 26, 169, 1, 1, 18 — the dialect read
+      'n' as a string constant, so every row sorts equal and LIMIT takes an
+      arbitrary slice. A top-N query written this way looks clean and is wrong.
+      The claim exists to pin the behaviour in writing; enforcement lives in
+      validate_recipes.py's quoted-alias rule and in the server's sanitiser,
+      not here. If this ever starts erroring, that is an improvement — the
+      failure becomes visible — and this claim should flip to expect: error.
+    query: >-
+      SELECT query, count(*) AS n FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+      GROUP BY query ORDER BY 'n' DESC LIMIT 1
     expect: success
 
   # ---------------------------------------------------------------
