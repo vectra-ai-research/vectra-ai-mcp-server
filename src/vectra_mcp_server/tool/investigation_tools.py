@@ -62,6 +62,62 @@ def unquote_identifier_aliases(query: str) -> str:
     )
 
 
+def strip_sql_comments(query: str) -> str:
+    """Remove SQL comments, leaving single-quoted literals untouched.
+
+    This MUST run before whitespace normalisation. Collapsing newlines first
+    turns a `-- comment` line into a comment that swallows everything after it
+    on the joined line — the remaining predicates, the ORDER BY, and the LIMIT.
+    The query then runs unfiltered and unbounded instead of failing, which is
+    strictly worse than a 400.
+
+    Literal-aware on purpose: `--` inside a string is data, not a comment. A
+    hunt for SQL-injection patterns in HTTP URIs legitimately searches for it,
+    and a regex strip would corrupt that query.
+    """
+    out: list[str] = []
+    i, n = 0, len(query)
+    in_literal = False
+
+    while i < n:
+        ch = query[i]
+
+        if in_literal:
+            out.append(ch)
+            if ch == "'":
+                # '' is an escaped quote *inside* a literal, not its end.
+                if i + 1 < n and query[i + 1] == "'":
+                    out.append(query[i + 1])
+                    i += 2
+                    continue
+                in_literal = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_literal = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if query.startswith("--", i):
+            nl = query.find("\n", i)
+            i = n if nl == -1 else nl
+            out.append(" ")
+            continue
+
+        if query.startswith("/*", i):
+            close = query.find("*/", i + 2)
+            i = n if close == -1 else close + 2
+            out.append(" ")
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
 class InvestigationMCPTools(BaseMCPTools):
     """MCP tools for investigations."""
 
@@ -549,10 +605,22 @@ class InvestigationMCPTools(BaseMCPTools):
         Returns:
             str: JSON with request_id and searchable_range. Use request_id with get_investigation_results.
         """
-        # Sanitize: collapse newlines to spaces, remove any backslash-escaped
-        # quotes the LLM may have introduced, fold double quotes to single
-        # (models use them for string literals, where they are invalid here),
-        # then repair the aliases that fold breaks.
+        # Sanitize. Two steps are order-dependent, in opposite directions, and
+        # both failures are silent — so this sequence is load-bearing:
+        #
+        #   strip_sql_comments FIRST, before newlines collapse. Join the lines
+        #   with a `--` comment still in place and it swallows every clause
+        #   after it, LIMIT included, leaving the query unbounded.
+        #
+        #   unquote_identifier_aliases LAST, after the double-quote fold. That
+        #   fold is what manufactures the broken alias forms, so repairing
+        #   before it runs fixes nothing. `ORDER BY 'x'` is the dangerous case:
+        #   the dialect accepts it as an ordering on a string constant and
+        #   returns unsorted rows without error.
+        #
+        # The fold itself is not optional — models reach for double quotes on
+        # string literals, which this dialect rejects.
+        query = strip_sql_comments(query)
         query = " ".join(query.split())
         query = query.replace('\\"', '"').replace("\\'", "'")
         query = query.replace('"', "'")
