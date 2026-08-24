@@ -137,7 +137,30 @@ async def probe(client: VectraClient, query: str, *,
         except Exception as e:                                  # noqa: BLE001
             return FAILED, None, f"{type(e).__name__}: {e}"[:120]
 
-        # 202 while running: data is an empty list and nothing else is set.
+        # Completion lives in meta.query_status, NOT at the top level. Observed
+        # shapes:
+        #   running   {"status": "RUNNING", "message": ..., "rows_available": 0}
+        #   finished  {"data": [...], "meta": {"query_status": "SUCCESS", ...}}
+        # A finished response carries no top-level `status` at all, so the
+        # earlier check — top-level status against {"completed","succeeded",...}
+        # — could only ever see "". That was survivable for a claim returning
+        # rows, because the `data` test caught it first, and silently fatal for
+        # one returning none: the loop fell through to "still processing" and
+        # polled until the deadline no matter how large the deadline was. Two
+        # array claims read as timeouts for exactly this reason, which looked
+        # like slow queries and was not.
+        meta = res.get("meta") or {}
+        qstatus = str(meta.get("query_status", "")).upper()
+        if qstatus in {"SUCCESS", "SUCCEEDED", "COMPLETED", "FINISHED", "DONE"}:
+            rows = res.get("data") or res.get("results") or []
+            n = len(rows) if isinstance(rows, list) else 0
+            # Zero rows is a valid query; only execution is under test.
+            return OK, None, f"completed, {n} row(s)"
+        if qstatus in {"FAILED", "ERROR", "CANCELLED", "CANCELED"}:
+            return (FAILED, meta.get("error_name") or res.get("error_name"),
+                    f"query_status={qstatus}")
+
+        # Fallbacks for a top-level status, in case the shape changes back.
         data = res.get("data")
         if res.get("results") or (isinstance(data, list) and data):
             return OK, None, "completed with rows"
@@ -145,7 +168,6 @@ async def probe(client: VectraClient, query: str, *,
         if status in {"failed", "error"}:
             return FAILED, res.get("error_name"), f"status={status}"
         if status in {"completed", "succeeded", "done", "finished"}:
-            # Accepted and executed; zero rows is still a valid query.
             return OK, None, "completed, no rows in window"
         # otherwise still processing — keep polling
 
@@ -186,8 +208,11 @@ async def run(args) -> int:
         if n:
             await asyncio.sleep(args.delay)
         query = c["query"] if c.get("raw") else " ".join(c["query"].split())
+        # A claim may raise its own ceiling: array predicates unnest every row
+        # and run several times longer than the scalar ones, even with `dt`.
         outcome, ename, detail = await probe(
-            client, query, poll_timeout=args.poll_timeout)
+            client, query,
+            poll_timeout=float(c.get("poll_timeout") or args.poll_timeout))
 
         expect_success = c["expect"] == "success"
         want_name = c.get("error_name")
@@ -231,10 +256,17 @@ async def run(args) -> int:
         print("  New capability — document it, and relax the recipe validator to match.")
 
     if args.update_verified:
+        # Same reasoning as the checks below, one step earlier: a filtered run
+        # cannot support a stamp that means "every claim was checked and held",
+        # however green the subset looks. --only is for iterating on one claim;
+        # stamping is for a full run.
+        if args.only:
+            print(f"\n{DIM}not stamping last_verified: --only ran {len(claims)} "
+                  f"of the claims, and the stamp asserts a complete run.{RESET}")
         # An indeterminate claim was not verified, so the stamp would assert a
         # completeness that did not happen. Requiring zero of all three is the
         # whole point of having the stamp.
-        if broken or newly or unknown:
+        elif broken or newly or unknown:
             print(f"\n{DIM}not stamping last_verified: "
                   f"{len(broken)} broken, {len(newly)} newly permitted, "
                   f"{len(unknown)} indeterminate — the stamp means every claim "

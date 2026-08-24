@@ -109,19 +109,42 @@ Validators reject queries containing any of:
 - Always include a sensible `LIMIT` (typical defaults: `100`, sometimes `1000`/`10000`).
 - Default time window is **last 14 days**; "last week" → 7 days; "recent" → 3 days.
 - Always filter by `timestamp` (every table has a `timestamp` column).
+- **Also filter by `dt`, the partition column**, over the same window:
+  `WHERE dt > date_add('hour', -24, now()) AND timestamp > date_add('hour', -24, now())`.
+  `timestamp` alone is correct but not selective — it filters rows after the
+  engine has read them, while `dt` prunes whole partitions before the scan. Every
+  recipe in the starter carries it, so queries written without it are the odd
+  ones out even where the cost is invisible.
+
+  No measured speed-up is claimed here. `CONTAINS(answers, …)` on
+  `network.dns._all` over one hour completed inside 50s both with and without
+  `dt` (probed 2026-08-24), so on a small window the pruning is not the
+  bottleneck. An earlier draft of this section cited a 50s-vs-120s comparison;
+  the 120s half came from a probe that could not detect a zero-row completion
+  and polled until its own deadline, so it measured the harness, not the engine.
+  Expect `dt` to matter on wide windows and large partitions, and do not treat a
+  slow query as evidence about `dt` without timing both forms.
 - Prefer aggregating with `GROUP BY` on the most meaningful identity columns (e.g. `id.orig_h`, `username`, `query`, `service`).
 - Use SELECT-list aliases in `ORDER BY`, but **not** in `GROUP BY` or `HAVING` (use the underlying expression there).
 - Bias toward the table's default columns; only `SELECT *` for forensic detail queries.
 
-### 3.7 The single allowed UNION
+### 3.7 UNION
 
-A top-level `UNION` is allowed **only** between exactly:
+Top-level `UNION` is supported across tables — not restricted to one pair, as
+this section previously claimed. Probed 2026-08-24: `network.dns._all UNION
+network.http._all` completed successfully, so the "single allowed UNION" rule
+was wrong and would have led agents to refuse legitimate queries.
+
+The common pattern remains combining the two authentication tables:
 
 ```
 network.ntlm._all  UNION  network.kerberos._all
 ```
 
-Each side must be a plain SELECT from its base table. Any other UNION (nested, more than two terms, other tables) is rejected.
+Each side must be a plain `SELECT` from its base table, and a single `LIMIT`
+applies to the combined result — put it after the last term, never before the
+`UNION`. Nested UNIONs and more than two terms are untested; treat them as
+unverified rather than forbidden.
 
 ### 3.8 Time-window patterns
 

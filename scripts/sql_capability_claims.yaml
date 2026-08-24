@@ -13,6 +13,7 @@
 #
 # expect: success | error
 # error_name: the `error_name` in the API's error payload, when expect: error
+# poll_timeout: override the run-wide --poll-timeout for one slow claim
 
 meta:
   reference: src/vectra_mcp_server/resources/sql_reference.md
@@ -21,7 +22,7 @@ meta:
   # Set only by a run where every claim held — no broken, no newly permitted,
   # no indeterminate. Two array claims currently time out, so this stays null
   # until they can reach a verdict.
-  last_verified: null
+  last_verified: 2026-08-24
 
 claims:
 
@@ -97,14 +98,23 @@ claims:
     claim: CONTAINS(array, element) is the valid array form
     section: "3.3"
     why: >-
-      Originally probed network.ldap (attributes[]), which exceeded a 120s poll
-      timeout twice and returned indeterminate. network.dns answers[] tests the
-      same signature against the table the baseline claim proves is fast.
+      Read as indeterminate three times — on network.ldap, then network.dns,
+      then again after adding `dt` — and none of it was the query. This claim
+      matches nothing in the tenant, and the poll loop could not recognise a
+      zero-row completion: finished responses carry meta.query_status, not a
+      top-level status, so the loop fell through to "still processing" and ran
+      to its deadline at any timeout value. Fixed in probe(). Kept `dt` because
+      every recipe uses it, not because it was measured to help — it wasn't.
+      A claim that matches no rows is the one that exercises this path, so leave
+      it matching nothing.
     query: >-
       SELECT timestamp FROM network.dns._all
-      WHERE timestamp > date_add('hour', -1, now())
+      WHERE dt > date_add('hour', -1, now())
+        AND timestamp > date_add('hour', -1, now())
         AND CONTAINS(answers, '1.1.1.1') LIMIT 1
     expect: success
+    # ~50s observed; headroom for a busier tenant.
+    poll_timeout: 180
 
   - id: contains-upper-array
     claim: Wrapping an array in UPPER() breaks the array form
@@ -124,13 +134,15 @@ claims:
     section: "3.3"
     why: >-
       This is the correct replacement for CONTAINS(UPPER(array), x), so it must
-      be known to work — the recipe fix depends on it. Moved off network.ldap
-      for the same timeout reason as contains-array.
+      be known to work — the recipe fix depends on it. Carries `dt` for the
+      partition-scan reason documented on contains-array.
     query: >-
       SELECT timestamp FROM network.dns._all
-      WHERE timestamp > date_add('hour', -1, now())
+      WHERE dt > date_add('hour', -1, now())
+        AND timestamp > date_add('hour', -1, now())
         AND ANY_MATCH(answers, a -> UPPER(a) = '1.1.1.1') LIMIT 1
     expect: success
+    poll_timeout: 180
 
   - id: lower-on-struct
     claim: LOWER() on a bare struct is rejected
