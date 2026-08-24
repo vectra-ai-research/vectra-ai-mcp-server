@@ -1,0 +1,305 @@
+# Claims this repo makes about the Investigation Query dialect.
+#
+# `sql_reference.md` and `schema_*.md` are hand-maintained and there is no
+# schema-discovery endpoint to generate them from, so nothing verifies that what
+# we document matches what the API accepts. This file is that verification:
+# every claim is a query with a predicted outcome, checked against a live
+# tenant by scripts/probe_sql_capabilities.py.
+#
+# Run it after changing the SQL engine. Three outcomes matter:
+#   holds            the reference is still correct
+#   BROKEN           the reference is now wrong — fix the docs
+#   NEWLY PERMITTED  something we forbid now works — new capability to document
+#
+# expect: success | error
+# error_name: the `error_name` in the API's error payload, when expect: error
+# poll_timeout: override the run-wide --poll-timeout for one slow claim
+
+meta:
+  reference: src/vectra_mcp_server/resources/sql_reference.md
+  # Bump when a claim is added, changed, or retired.
+  revision: 3
+  # Set only by a run where every claim held — no broken, no newly permitted,
+  # no indeterminate. Two array claims currently time out, so this stays null
+  # until they can reach a verdict.
+  last_verified: 2026-08-24
+
+claims:
+
+  # ---------------------------------------------------------------
+  # Baseline — if these fail, the probe itself is misconfigured
+  # ---------------------------------------------------------------
+  - id: baseline-select
+    claim: A minimal SELECT with LIMIT and a timestamp filter is accepted
+    section: "3.6"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now()) LIMIT 1
+    expect: success
+
+  # ---------------------------------------------------------------
+  # String matching — the CONTAINS class of bug
+  # ---------------------------------------------------------------
+  - id: contains-two-strings
+    claim: CONTAINS has no two-string signature
+    section: "3.3"
+    why: >-
+      query-construction.md documented CONTAINS(LOWER(f), LOWER('v')) as the
+      substring idiom and 45 recipe call sites copied it. If this claim ever
+      stops holding, that guidance becomes valid again and the validator's
+      contains-on-string rule must be relaxed.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND CONTAINS(LOWER(query), LOWER('example')) LIMIT 1
+    expect: error
+    error_name: FUNCTION_NOT_FOUND
+
+  - id: like-substring
+    claim: LIKE is the working substring filter
+    section: "3.3"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND LOWER(query) LIKE LOWER('%example%') LIMIT 1
+    expect: success
+
+  - id: strpos-substring
+    claim: STRPOS works as an alternative substring filter
+    section: "3.3"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND STRPOS(LOWER(query), 'example') > 0 LIMIT 1
+    expect: success
+
+  - id: regexp-like-two-arg
+    claim: REGEXP_LIKE accepts two arguments
+    section: "3.3"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND REGEXP_LIKE(query, '(?i)example') LIMIT 1
+    expect: success
+
+  - id: regexp-like-three-arg
+    claim: REGEXP_LIKE rejects a third argument
+    section: "3.3"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND REGEXP_LIKE(query, 'example', 'i') LIMIT 1
+    expect: error
+
+  # ---------------------------------------------------------------
+  # Arrays
+  # ---------------------------------------------------------------
+  - id: contains-array
+    claim: CONTAINS(array, element) is the valid array form
+    section: "3.3"
+    why: >-
+      Read as indeterminate three times — on network.ldap, then network.dns,
+      then again after adding `dt` — and none of it was the query. This claim
+      matches nothing in the tenant, and the poll loop could not recognise a
+      zero-row completion: finished responses carry meta.query_status, not a
+      top-level status, so the loop fell through to "still processing" and ran
+      to its deadline at any timeout value. Fixed in probe(). Kept `dt` because
+      every recipe uses it, not because it was measured to help — it wasn't.
+      A claim that matches no rows is the one that exercises this path, so leave
+      it matching nothing.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE dt > date_add('hour', -1, now())
+        AND timestamp > date_add('hour', -1, now())
+        AND CONTAINS(answers, '1.1.1.1') LIMIT 1
+    expect: success
+    # ~50s observed; headroom for a busier tenant.
+    poll_timeout: 180
+
+  - id: contains-upper-array
+    claim: Wrapping an array in UPPER() breaks the array form
+    section: "3.3"
+    why: >-
+      UPPER() returns varchar, so CONTAINS(UPPER(array), x) has no valid
+      signature. Recipes used this shape; ANY_MATCH is the correct form.
+    query: >-
+      SELECT timestamp FROM network.ldap._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND CONTAINS(UPPER(attributes), 'SERVICEPRINCIPALNAME') LIMIT 1
+    expect: error
+    error_name: FUNCTION_NOT_FOUND
+
+  - id: any-match-lambda
+    claim: ANY_MATCH with a lambda is supported
+    section: "3.3"
+    why: >-
+      This is the correct replacement for CONTAINS(UPPER(array), x), so it must
+      be known to work — the recipe fix depends on it. Carries `dt` for the
+      partition-scan reason documented on contains-array.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE dt > date_add('hour', -1, now())
+        AND timestamp > date_add('hour', -1, now())
+        AND ANY_MATCH(answers, a -> UPPER(a) = '1.1.1.1') LIMIT 1
+    expect: success
+    poll_timeout: 180
+
+  - id: lower-on-struct
+    claim: LOWER() on a bare struct is rejected
+    section: "3.3"
+    why: >-
+      The CloudTrail recipe shipped LOWER(vectra.entity.resolved_identity) for
+      months on a documented-VARCHAR claim that was wrong — the field is a
+      struct with eight leaves. Same class as contains-upper-array: these
+      functions take varchar, so a composite argument has no signature. If this
+      ever stops holding, the validator's scalar-fn-on-composite rule can relax.
+    query: >-
+      SELECT timestamp FROM aws.cloudtrail._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND LOWER(vectra.entity.resolved_identity) LIKE LOWER('%x%') LIMIT 1
+    expect: error
+    error_name: FUNCTION_NOT_FOUND
+
+  # ---------------------------------------------------------------
+  # Column aliases
+  # ---------------------------------------------------------------
+  - id: alias-single-quoted-rejected
+    claim: A single-quoted column alias is a syntax error
+    section: "3.4"
+    why: >-
+      sql_reference.md documented AS "failure_count" and run_investigation's own
+      description mandated AS 'failure_count'. The server folds every double
+      quote to a single quote, so both spellings arrived as the rejected form and
+      every documented top-N example failed. Bare identifiers are the only form
+      that survives the fold; unquote_identifier_aliases() now repairs the rest.
+    query: >-
+      SELECT count(*) AS 'n' FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now()) LIMIT 1
+    expect: error
+    error_name: SYNTAX_ERROR
+
+  - id: alias-bare-accepted
+    claim: A bare column alias is accepted and usable in ORDER BY
+    section: "3.4"
+    query: >-
+      SELECT query, count(*) AS n FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+      GROUP BY query ORDER BY n DESC LIMIT 1
+    expect: success
+
+  - id: order-by-quoted-is-silent
+    claim: ORDER BY on a quoted token is accepted — and orders by nothing
+    section: "3.4"
+    why: >-
+      THE PROBE CANNOT CATCH THIS ONE. Expect: success is recorded because the
+      query genuinely succeeds; what it does not do is sort. Probed live
+      2026-08-24 against aws.cloudtrail._all, ORDER BY 'n' DESC LIMIT 10 returned
+      counts in the order 17, 2, 13, 52, 14, 26, 169, 1, 1, 18 — the dialect read
+      'n' as a string constant, so every row sorts equal and LIMIT takes an
+      arbitrary slice. A top-N query written this way looks clean and is wrong.
+      The claim exists to pin the behaviour in writing; enforcement lives in
+      validate_recipes.py's quoted-alias rule and in the server's sanitiser,
+      not here. If this ever starts erroring, that is an improvement — the
+      failure becomes visible — and this claim should flip to expect: error.
+    query: >-
+      SELECT query, count(*) AS n FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+      GROUP BY query ORDER BY 'n' DESC LIMIT 1
+    expect: success
+
+  # ---------------------------------------------------------------
+  # CIDR
+  # ---------------------------------------------------------------
+  - id: contains-cidr
+    claim: CONTAINS(cidr, TRY_CAST(ip AS IPADDRESS)) filters by IP range
+    section: "3.4"
+    query: >-
+      SELECT timestamp FROM network.isession._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND CONTAINS('10.0.0.0/8', TRY_CAST(id.orig_h AS IPADDRESS)) LIMIT 1
+    expect: success
+
+  # ---------------------------------------------------------------
+  # §3.5 forbidden constructs — each should still be rejected
+  # ---------------------------------------------------------------
+  - id: forbidden-join
+    claim: JOIN is unsupported
+    section: "3.5"
+    query: >-
+      SELECT a.timestamp FROM network.dns._all a
+      JOIN network.http._all b ON a.uid = b.uid
+      WHERE a.timestamp > date_add('hour', -1, now()) LIMIT 1
+    expect: error
+
+  - id: forbidden-cte
+    claim: CTEs / WITH are unsupported
+    section: "3.5"
+    query: >-
+      WITH x AS (SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now()) LIMIT 1) SELECT * FROM x
+    expect: error
+
+  - id: line-comment-tolerated
+    claim: SQL line comments are tolerated by the API, not rejected
+    section: "3.5"
+    why: >-
+      Probed 2026-08-23: this query completed and returned rows. §3.5 previously
+      claimed the API rejects comments; it does not. That matters because the
+      *server* collapses newlines during normalisation, so a tolerated comment
+      would swallow every clause after it including the LIMIT, leaving the query
+      unbounded. Our own normalisation was the sole hazard, not the API — hence
+      strip_sql_comments() runs before the whitespace join. If this claim ever
+      flips to rejection, the strip becomes redundant rather than load-bearing.
+    query: "SELECT timestamp FROM network.dns._all -- comment\nWHERE timestamp > date_add('hour', -1, now()) LIMIT 1"
+    expect: success
+    raw: true          # send the real newline; do not let the probe normalise it
+
+  - id: forbidden-dml
+    claim: DML is rejected
+    section: "3.5"
+    query: "DELETE FROM network.dns._all WHERE 1=1"
+    expect: error
+
+  # ---------------------------------------------------------------
+  # §3.7 — previously forbidden, confirmed supported 2026-08-21
+  # ---------------------------------------------------------------
+  - id: union-supported
+    claim: UNION is supported across tables
+    section: "3.7"
+    why: >-
+      An earlier version of this claim put LIMIT before UNION, which is invalid
+      in any dialect, and the probe reported the reference as broken. The LIMIT
+      applies to the combined result.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+      UNION SELECT timestamp FROM network.http._all
+      WHERE timestamp > date_add('hour', -1, now())
+      LIMIT 1
+    expect: success
+
+  - id: subquery-supported
+    claim: Subqueries in WHERE ... IN are supported
+    section: "3.7"
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('hour', -1, now())
+        AND id.orig_h IN (SELECT id.orig_h FROM network.isession._all
+          WHERE timestamp > date_add('hour', -1, now()) LIMIT 5) LIMIT 1
+    expect: success
+
+  # ---------------------------------------------------------------
+  # Table existence contradictions
+  # ---------------------------------------------------------------
+  - id: table-network-smtp-absent
+    claim: network.smtp does not exist
+    section: "2"
+    why: >-
+      sql_reference.md says confirmed TABLE_NOT_FOUND; schema_network.md
+      documents an smtp metadata type. The two contradict each other and this
+      claim decides which is wrong.
+    query: >-
+      SELECT timestamp FROM network.smtp._all
+      WHERE timestamp > date_add('hour', -1, now()) LIMIT 1
+    expect: error
+    error_name: TABLE_NOT_FOUND

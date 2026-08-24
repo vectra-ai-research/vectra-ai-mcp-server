@@ -23,7 +23,9 @@ Notation:
 - [`rdp`](#rdp)
 - [`smbfilestxn`](#smbfilestxn)
 - [`smbmappingtxn`](#smbmappingtxn)
-- [`smtp`](#smtp)
+- ~~[`smtp`](#smtp)~~ — **not queryable.** `network.smtp._all` returns
+  `TABLE_NOT_FOUND` (probed live 2026-08-23). The attribute list below is
+  retained for reference only; do not write queries against it.
 - [`ssh`](#ssh)
 - [`ssl`](#ssl)
 - [`suricata`](#suricata)

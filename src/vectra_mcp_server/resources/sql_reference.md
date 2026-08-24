@@ -70,13 +70,34 @@ Misc: `ABS`, `CAST`, `TRY_CAST`, `DISTINCT`.
 - `CAST(expr AS TYPE)` and `TRY_CAST(expr AS TYPE)` — supported types include `INTEGER`, `DOUBLE`, `BOOLEAN`, `DATE`, `TIMESTAMP`, `VARCHAR`, `IPADDRESS`
 - Dotted field access on nested objects: `id.orig_h`, `status.error_code`, `device_detail.browser`
 - Array element access via `array_agg`, `CONTAINS(array_col, value)`
-- Quoted column aliases: `COUNT(*) AS "failure_count"`
+- Column aliases as **bare, unquoted identifiers**: `COUNT(*) AS failure_count`,
+  then `ORDER BY failure_count DESC`. `ORDER BY 2 DESC` (column position) also
+  works.
+
+  Never quote an alias. `AS 'failure_count'` is a hard `SYNTAX_ERROR`, and
+  `ORDER BY 'failure_count'` is worse: the dialect accepts it as an ordering on
+  a string *constant*, so the rows come back unsorted with no error, and `LIMIT`
+  then takes an arbitrary slice. A top-N query written that way succeeds and is
+  silently not a top-N. Probed live 2026-08-24: `ORDER BY 'n' DESC LIMIT 10`
+  over `aws.cloudtrail._all` returned counts ordered 17, 2, 13, 52, 14, 26,
+  169, 1, 1, 18.
+
+  Double quotes are the correct Trino spelling but cannot be used here:
+  `run_investigation` folds every `"` to `'` (models reach for double quotes on
+  string literals, where this dialect rejects them), which manufactures exactly
+  the two broken forms above. The server repairs whole-term aliases after that
+  fold, but write them bare and the repair never has to fire.
 
 ### 3.5 ABSOLUTELY FORBIDDEN
 
 Validators reject queries containing any of:
 
-- SQL comments — `--` or `/* ... */`
+- SQL comments — `--` or `/* ... */`. **Not rejected by the API** (probed live
+  2026-08-23: a query containing `--` completed and returned rows). They are
+  stripped by this server before submission, because `run_investigation`
+  normalises whitespace and joining the lines would let a comment swallow every
+  clause after it — including the `LIMIT`, leaving the query unbounded. Do not
+  put comments in a query; if one slips through it is removed, not honoured.
 - `JOIN` of any kind (confirmed unsupported — use `UNION` or a subquery instead)
 - CTEs / `WITH` clauses
 - DDL/DML: `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `MERGE`, `TRUNCATE`, etc.
@@ -89,6 +110,21 @@ Validators reject queries containing any of:
 - Always include a sensible `LIMIT` (typical defaults: `100`, sometimes `1000`/`10000`).
 - Default time window is **last 14 days**; "last week" → 7 days; "recent" → 3 days.
 - Always filter by `timestamp` (every table has a `timestamp` column).
+- **Also filter by `dt`, the partition column**, over the same window:
+  `WHERE dt > date_add('hour', -24, now()) AND timestamp > date_add('hour', -24, now())`.
+  `timestamp` alone is correct but not selective — it filters rows after the
+  engine has read them, while `dt` prunes whole partitions before the scan. Every
+  recipe in the starter carries it, so queries written without it are the odd
+  ones out even where the cost is invisible.
+
+  No measured speed-up is claimed here. `CONTAINS(answers, …)` on
+  `network.dns._all` over one hour completed inside 50s both with and without
+  `dt` (probed 2026-08-24), so on a small window the pruning is not the
+  bottleneck. An earlier draft of this section cited a 50s-vs-120s comparison;
+  the 120s half came from a probe that could not detect a zero-row completion
+  and polled until its own deadline, so it measured the harness, not the engine.
+  Expect `dt` to matter on wide windows and large partitions, and do not treat a
+  slow query as evidence about `dt` without timing both forms.
 - Prefer aggregating with `GROUP BY` on the most meaningful identity columns (e.g. `id.orig_h`, `username`, `query`, `service`).
 - Use SELECT-list aliases in `ORDER BY`, but **not** in `GROUP BY` or `HAVING` (use the underlying expression there).
 - Bias toward the table's default columns; only `SELECT *` for forensic detail queries.
@@ -96,13 +132,19 @@ Validators reject queries containing any of:
 ### 3.7 UNION and subqueries
 
 `UNION` and `UNION ALL` are supported across **any** tables — not
-limited to a single pair. Confirmed live, e.g.:
+limited to a single pair. Confirmed live, and re-probed 2026-08-24
+(`network.dns._all UNION network.http._all` completed successfully), e.g.:
 
 ```sql
 SELECT id.orig_h FROM network.http._all WHERE timestamp > date_add('day', -1, now())
 UNION
 SELECT id.orig_h FROM network.dns._all  WHERE timestamp > date_add('day', -1, now())
 ```
+
+Each side must be a plain `SELECT` from its base table, and a single `LIMIT`
+applies to the combined result — put it after the last term, never before the
+`UNION`. Nested UNIONs and more than two terms are untested; treat them as
+unverified rather than forbidden.
 
 Subqueries are also supported, e.g. `WHERE id.orig_h IN (SELECT id.orig_h FROM network.dns._all WHERE ...)`.
 
@@ -159,7 +201,7 @@ Hosts with many failed Kerberos pre-auths (brute force / sprays):
 SELECT
     id.orig_h AS source_ip,
     client,
-    count(*) AS "failure_count"
+    count(*) AS failure_count
 FROM network.kerberos._all
 WHERE request_type = 'AS'
   AND LOWER(service) LIKE '%krbtgt%'
@@ -167,7 +209,7 @@ WHERE request_type = 'AS'
   AND timestamp BETWEEN date_add('day', -7, now()) AND now()
 GROUP BY id.orig_h, client
 HAVING count(*) > 20
-ORDER BY "failure_count" DESC
+ORDER BY failure_count DESC
 LIMIT 100
 ```
 
@@ -178,14 +220,14 @@ SELECT
     id.orig_h AS source_ip,
     client,
     service,
-    count(*) AS "auth_count"
+    count(*) AS auth_count
 FROM network.kerberos._all
 WHERE success = TRUE
   AND DATE_DIFF('hour', DATE(timestamp), timestamp) BETWEEN 0 AND 5
   AND timestamp BETWEEN date_add('day', -7, now()) AND now()
 GROUP BY id.orig_h, client, service
 HAVING count(*) > 5
-ORDER BY "auth_count" DESC
+ORDER BY auth_count DESC
 LIMIT 100
 ```
 
@@ -197,13 +239,13 @@ SELECT
     orig_hostname,
     username,
     domain,
-    COUNT(*) AS "failure_count"
+    COUNT(*) AS failure_count
 FROM network.ntlm._all
 WHERE success = FALSE
   AND timestamp BETWEEN date_add('day', -1, now()) AND now()
 GROUP BY id.orig_h, orig_hostname, username, domain
 HAVING COUNT(*) > 5
-ORDER BY "failure_count" DESC
+ORDER BY failure_count DESC
 LIMIT 100
 ```
 

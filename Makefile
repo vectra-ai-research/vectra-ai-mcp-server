@@ -36,6 +36,15 @@ check: compile ## Everything CI runs: compile, annotation check, tests
 	uv run pytest tests/ -q
 	@echo "\nall checks passed"
 
+probe: ## Verify the SQL reference against the live API (NEEDS credentials). Extra flags via ARGS=
+	uv run python scripts/probe_sql_capabilities.py $(ARGS)
+
+probe-verify: ## Same, and stamp last_verified if every claim holds
+	uv run python scripts/probe_sql_capabilities.py --update-verified $(ARGS)
+
+probe-tables: ## Same, plus an existence check on every documented table
+	uv run python scripts/probe_sql_capabilities.py --tables $(ARGS)
+
 serve: ## Run the server on stdio for manual poking (NEEDS credentials)
 	uv run vectra-ai-mcp-server --transport stdio --debug
 
