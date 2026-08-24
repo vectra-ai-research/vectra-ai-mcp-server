@@ -2,11 +2,18 @@
 
 from typing import Literal, Annotated
 from pydantic import Field, IPvAnyAddress
+import hashlib
 import json
-import base64
+import tempfile
+from pathlib import Path
 
 from ..utils.validators import validate_date_range
 from .base import READ_ONLY, BaseMCPTools, validate_detection_fields
+
+#: Where captures land. A fixed subdirectory rather than a random temp name so
+#: repeat calls overwrite instead of accumulating, and so an operator can find
+#: and clear them without guessing.
+PCAP_DIR = Path(tempfile.gettempdir()) / "vectra-pcap"
 
 
 class DetectionMCPTools(BaseMCPTools):
@@ -222,23 +229,80 @@ class DetectionMCPTools(BaseMCPTools):
         ]
     ) -> str:
         """
-        Get pcap file for a specific detection.
-        
+        Download the PCAP for a network detection and write it to disk.
+
+        Returns the file path and a sha256 of the bytes as received, NOT the
+        capture itself. Packet data never passes through the conversation:
+        analyse the file with tshark (or the vectra-pcap skill's
+        pcap-context.sh) by pointing it at the returned path.
+
+        Only network detections have PCAPs. Cloud and log-based detections
+        (M365, Azure AD, AWS CloudTrail) do not, and report that plainly.
+
         Returns:
-            str: Base64 encoded pcap data or error message.
+            str: JSON with detection_id, path, size_bytes, sha256, format.
 
         Raises:
             Exception: If retrieval fails.
         """
+        # This used to return base64 of the whole capture inline, which made the
+        # caller re-emit every byte to get it onto disk — unusable past a trivial
+        # size, and worse, it put the chain of custody downstream of the
+        # transcription. The sha256 below is taken on the bytes as received, so it
+        # fingerprints what Vectra sent rather than what survived the round trip.
         try:
             pcap_bytes = await self.client.get_detection_pcap(detection_id)
 
             if not pcap_bytes:
-                return f"No pcap data found for detection ID {detection_id}."
+                return json.dumps({
+                    "detection_id": detection_id,
+                    "pcap_available": False,
+                    "reason": (
+                        "No PCAP data. PCAPs exist only for network detections; "
+                        "cloud and log-based detections (M365, Azure AD, AWS) "
+                        "have none."
+                    ),
+                }, indent=2)
 
-            encoded_content = base64.b64encode(pcap_bytes).decode('utf-8')
+            PCAP_DIR.mkdir(parents=True, exist_ok=True)
+            path = PCAP_DIR / f"detection-{detection_id}.pcap"
+            path.write_bytes(pcap_bytes)
 
-            return f"PCAP data for detection ID {detection_id}:\n{encoded_content}"
+            # libpcap magic (either endianness) vs pcapng block type. Cheap
+            # sanity check so a truncated or HTML error body is caught here
+            # rather than surfacing as an opaque tshark failure later.
+            head = pcap_bytes[:4]
+            fmt = None
+            if head in (b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",
+                        b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d"):
+                fmt = "pcap"
+            elif head == b"\x0a\x0d\x0d\x0a":
+                fmt = "pcapng"
+
+            result = {
+                "detection_id": detection_id,
+                "pcap_available": True,
+                "path": str(path),
+                "size_bytes": len(pcap_bytes),
+                "sha256": hashlib.sha256(pcap_bytes).hexdigest(),
+                "format": fmt or "unrecognised",
+                "next_step": (
+                    f"Run tshark against {path} — do not read the file into "
+                    f"context. The sha256 above is of the bytes Vectra returned; "
+                    f"verify with: shasum -a 256 {path}"
+                ),
+            }
+            if fmt is None:
+                result["warning"] = (
+                    "File does not begin with a pcap or pcapng magic number. It "
+                    "may be truncated or an error body saved verbatim."
+                )
+            result["note"] = (
+                "Written by the MCP server. If this path is not visible to your "
+                "shell, the server is running on a different host or container "
+                "than your tools."
+            )
+            return json.dumps(result, indent=2)
 
         except Exception as e:
             raise Exception(f"Failed to retrieve pcap for detection {detection_id}: {str(e)}")
