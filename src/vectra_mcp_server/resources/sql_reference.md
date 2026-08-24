@@ -75,7 +75,12 @@ Misc: `ABS`, `CAST`, `TRY_CAST`, `DISTINCT`.
 
 Validators reject queries containing any of:
 
-- SQL comments — `--` or `/* ... */`
+- SQL comments — `--` or `/* ... */`. **Not rejected by the API** (probed live
+  2026-08-23: a query containing `--` completed and returned rows). They are
+  stripped by this server before submission, because `run_investigation`
+  normalises whitespace and joining the lines would let a comment swallow every
+  clause after it — including the `LIMIT`, leaving the query unbounded. Do not
+  put comments in a query; if one slips through it is removed, not honoured.
 - `JOIN` of any kind
 - CTEs / `WITH` clauses
 - Subqueries — anything matching `FROM (SELECT ...)`, `IN (SELECT ...)`, `EXISTS (...)`, etc.
