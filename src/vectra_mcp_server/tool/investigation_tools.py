@@ -22,6 +22,62 @@ logger = get_logger(__name__)
 _INVESTIGATION_TIMEOUT = 20
 
 
+def strip_sql_comments(query: str) -> str:
+    """Remove SQL comments, leaving single-quoted literals untouched.
+
+    This MUST run before whitespace normalisation. Collapsing newlines first
+    turns a `-- comment` line into a comment that swallows everything after it
+    on the joined line — the remaining predicates, the ORDER BY, and the LIMIT.
+    The query then runs unfiltered and unbounded instead of failing, which is
+    strictly worse than a 400.
+
+    Literal-aware on purpose: `--` inside a string is data, not a comment. A
+    hunt for SQL-injection patterns in HTTP URIs legitimately searches for it,
+    and a regex strip would corrupt that query.
+    """
+    out: list[str] = []
+    i, n = 0, len(query)
+    in_literal = False
+
+    while i < n:
+        ch = query[i]
+
+        if in_literal:
+            out.append(ch)
+            if ch == "'":
+                # '' is an escaped quote *inside* a literal, not its end.
+                if i + 1 < n and query[i + 1] == "'":
+                    out.append(query[i + 1])
+                    i += 2
+                    continue
+                in_literal = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_literal = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if query.startswith("--", i):
+            nl = query.find("\n", i)
+            i = n if nl == -1 else nl
+            out.append(" ")
+            continue
+
+        if query.startswith("/*", i):
+            close = query.find("*/", i + 2)
+            i = n if close == -1 else close + 2
+            out.append(" ")
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
 class InvestigationMCPTools(BaseMCPTools):
     """MCP tools for investigations."""
 
@@ -503,9 +559,13 @@ class InvestigationMCPTools(BaseMCPTools):
         Returns:
             str: JSON with request_id and searchable_range. Use request_id with get_investigation_results.
         """
-        # Sanitize: collapse newlines to spaces, strip double quotes from
-        # column aliases (replace with single quotes or remove), and remove
-        # any backslash-escaped quotes the LLM may have introduced.
+        # Sanitize. Order matters: comments must go BEFORE newlines collapse,
+        # or a `-- comment` line swallows the rest of the query including the
+        # LIMIT (see strip_sql_comments).
+        query = strip_sql_comments(query)
+        # Collapse newlines to spaces, strip double quotes from column aliases
+        # (replace with single quotes or remove), and remove any
+        # backslash-escaped quotes the LLM may have introduced.
         query = " ".join(query.split())
         query = query.replace('\\"', '"').replace("\\'", "'")
         query = query.replace('"', "'")
