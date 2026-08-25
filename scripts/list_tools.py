@@ -30,23 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-from vectra_mcp_server.resources.investigation_resources import (  # noqa: E402
-    InvestigationResourceTools,
-)
-from vectra_mcp_server.tool.detection_tools import DetectionMCPTools  # noqa: E402
-from vectra_mcp_server.tool.entity_tools import EntityMCPTools  # noqa: E402
-from vectra_mcp_server.tool.investigation_tools import InvestigationMCPTools  # noqa: E402
-from vectra_mcp_server.tool.management_tools import ManagementMCPTools  # noqa: E402
-from vectra_mcp_server.tool.response_tools import ResponseMCPTools  # noqa: E402
-
-TOOL_CLASSES = (
-    DetectionMCPTools,
-    EntityMCPTools,
-    InvestigationMCPTools,
-    ManagementMCPTools,
-    ResponseMCPTools,
-    InvestigationResourceTools,
-)
+from vectra_mcp_server.registry import TOOL_CLASSES  # noqa: E402
 
 
 def classify(ann) -> str:

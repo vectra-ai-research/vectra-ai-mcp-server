@@ -15,14 +15,9 @@ from .vectra_client import VectraClient
 from .config import load_configuration, ServerConfiguration
 from .utils.logging import setup_logging, get_logger, configure_debug_logging
 
+from .registry import TOOL_CLASSES
 from .tool.base import READ_ONLY
-from .tool.detection_tools import DetectionMCPTools
-from .tool.entity_tools import EntityMCPTools
-from .tool.investigation_tools import InvestigationMCPTools
-from .tool.management_tools import ManagementMCPTools
-from .tool.response_tools import ResponseMCPTools
 from .prompt.prompt import VectraMCPPrompts
-from .resources.investigation_resources import InvestigationResourceTools
 
 logger = get_logger(__name__)
 
@@ -109,13 +104,13 @@ class VectraMCPServer:
         return len(self.server._tool_manager.list_tools())
 
     def _register_tenant_tools(self, client: VectraClient, prefix: Optional[str], tenant_label: Optional[str]):
-        """Register all tool classes for a single tenant."""
-        DetectionMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
-        EntityMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
-        InvestigationMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
-        ManagementMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
-        ResponseMCPTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
-        InvestigationResourceTools(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
+        """Register all tool classes for a single tenant.
+
+        Driven by registry.TOOL_CLASSES so this, the tool inventory script, and
+        the annotation tests cannot disagree about which classes exist.
+        """
+        for cls in TOOL_CLASSES:
+            cls(self.server, client, prefix=prefix, tenant_label=tenant_label).register_tools()
         VectraMCPPrompts(self.server, client, prefix=prefix, tenant_label=tenant_label).register_prompts()
 
     def _register_list_tenants_tool(self):
