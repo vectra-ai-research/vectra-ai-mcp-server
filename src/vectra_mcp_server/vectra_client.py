@@ -1253,6 +1253,12 @@ class VectraClient:
         NOTE: unlike /findings/, this endpoint does **not** accept `size`.
         Sending it returns 400 (probed live 2026-08-24) — the contract lists no
         `size` parameter here, and the API enforces that.
+
+        It is also where the useful `pivot` lives: a *host-scoped* rendered
+        Investigation Query. /findings/ is a tenant-wide view of a finding type
+        and its pivot is frequently null, since there is no single host to scope
+        a query to. Verified live on the same finding: null via /findings/,
+        rendered and directly executable here.
         """
         params: Dict[str, Any] = {"page": page, "page_size": page_size}
         for key, value in (

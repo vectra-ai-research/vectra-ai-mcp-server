@@ -105,14 +105,27 @@ class FindingsMCPTools(BaseMCPTools):
         about infection vector, attack surface, or how something got in.
 
         This endpoint takes no `size` parameter — unlike list_findings — and
-        sending one returns 400. It also carries no `pivot`; for the rendered
-        Investigation Query behind a finding, call list_findings with
-        size='detailed' and match on finding id.
+        sending one returns 400.
 
-        Unlike list_findings, this one DOES return severity inline (probed
-        2026-08-24: high / medium came back populated here while /findings/
-        returned null for the same field). Use list_finding_types for the rest —
-        remediation, compliance_frameworks and rationale are only there.
+        **This is where the useful `pivot` lives.** Findings here carry a
+        *host-scoped* rendered Investigation Query — the SQL that substantiates
+        this finding on this host. list_findings is a tenant-wide view of the
+        finding type, so its pivot is often null: there is no single host to
+        scope a query to. Verified 2026-08-24: "Passwords in Cleartext over
+        HTTP" had pivot null via list_findings and a rendered, directly
+        executable host-specific query here.
+
+        So the loop is: get_host_findings -> read pivot.query -> run_investigation.
+        No substitution needed; the query came back as valid single-line SQL.
+
+        Severity is returned inline here (unlike list_findings, where it was
+        null). Use list_finding_types for remediation, compliance_frameworks and
+        rationale — those are only in the type catalogue.
+
+        Treat a finding as a *lead*, not a conclusion. The pivot exists so the
+        claim can be checked, and checking sometimes refutes it: the cleartext
+        finding above turned out to be an Nmap NSE probe with empty credential
+        parameters, i.e. a pattern match on URL shape rather than a real leak.
 
         Returns:
             str: JSON with the findings page, or a note if findings are unavailable.
@@ -201,6 +214,12 @@ class FindingsMCPTools(BaseMCPTools):
         Useful for exposure posture questions, severity distribution, and
         governance reporting — `resolution` distinguishes what is Open from what
         has been explicitly Risk Accepted.
+
+        `pivot` here is frequently null even with size='detailed'. This is a
+        tenant-wide view of a finding *type* across many assets, so there is
+        often no single host to scope a query to. For a runnable, host-specific
+        Investigation Query use get_host_findings instead — that is where the
+        rendered pivot appears.
 
         Returns:
             str: JSON with the findings page, or a note if findings are unavailable.
