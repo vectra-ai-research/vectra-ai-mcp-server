@@ -16,21 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from vectra_mcp_server.resources.investigation_resources import InvestigationResourceTools
-from vectra_mcp_server.tool.detection_tools import DetectionMCPTools
-from vectra_mcp_server.tool.entity_tools import EntityMCPTools
-from vectra_mcp_server.tool.investigation_tools import InvestigationMCPTools
-from vectra_mcp_server.tool.management_tools import ManagementMCPTools
-from vectra_mcp_server.tool.response_tools import ResponseMCPTools
-
-TOOL_CLASSES = (
-    DetectionMCPTools,
-    EntityMCPTools,
-    InvestigationMCPTools,
-    ManagementMCPTools,
-    ResponseMCPTools,
-    InvestigationResourceTools,
-)
+from vectra_mcp_server.registry import TOOL_CLASSES
 
 LABEL = "prod (https://prod.vectra.ai)"
 

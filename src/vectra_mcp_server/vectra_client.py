@@ -1160,6 +1160,137 @@ class VectraClient:
         )
 
     # Search functionality
+    # ------------------------------------------------------------------
+    # Posture findings (v3.5)
+    #
+    # A different axis from detections: detections say something is happening,
+    # findings say what makes it possible. Standing exposure rather than active
+    # behaviour, with its own lifecycle (Open / In Progress / Risk Accepted)
+    # instead of triage-to-verdict.
+    #
+    # Every findings path is tagged `unreleased` in the API contract, so these
+    # may 404 or 403 on a tenant where the feature is not enabled. Callers
+    # should surface that plainly rather than treating it as a failure.
+    #
+    # Server-side `ordering` accepts ONLY `severity`. The contract states that
+    # first_seen, last_seen, status and asset_count are not sortable. Do not
+    # sort those client-side across pages — you can only order the page you
+    # fetched, which yields a plausible and wrong "most recent" list. Filter
+    # with last_seen_gte instead.
+    # ------------------------------------------------------------------
+
+    #: Response verbosity. `detailed` adds pivot, asset_count and
+    #: resolution_counts; combined with a large page it will swamp an agent's
+    #: context, which is why the tool layer defaults to `regular`.
+    FINDING_SIZES = ("small", "regular", "detailed")
+
+    async def get_findings(
+        self,
+        severity: Optional[str] = None,
+        category: Optional[str] = None,
+        status: Optional[str] = None,
+        resolution: Optional[str] = None,
+        finding_type_uid: Optional[str] = None,
+        first_seen_gte: Optional[str] = None,
+        last_seen_gte: Optional[str] = None,
+        size: str = "regular",
+        ordering: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """List posture findings. GET /api/v3.5/findings/"""
+        params: Dict[str, Any] = {"size": size, "page": page, "page_size": page_size}
+        for key, value in (
+            ("severity", severity),
+            ("category", category),
+            ("status", status),
+            ("resolution", resolution),
+            ("finding_type_uid", finding_type_uid),
+            ("first_seen_gte", first_seen_gte),
+            ("last_seen_gte", last_seen_gte),
+            ("ordering", ordering),
+        ):
+            if value is not None:
+                params[key] = value
+        return await self._make_request(
+            "GET", "findings/", params=params, api_version="v3.5"
+        )
+
+    async def get_host_findings(
+        self,
+        host_id: int,
+        severity: Optional[str] = None,
+        category: Optional[str] = None,
+        status: Optional[str] = None,
+        resolution: Optional[str] = None,
+        finding_type_uid: Optional[str] = None,
+        last_seen_gte: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """Findings on one host. GET /api/v3.5/hosts/{host_id}/findings/
+
+        This is the one that pairs with an investigation: it answers why a host
+        was reachable, which a detection timeline cannot.
+
+        NOTE: unlike /findings/, this endpoint does **not** accept `size`.
+        Sending it returns 400 (probed live 2026-08-24) — the contract lists no
+        `size` parameter here, and the API enforces that.
+        """
+        params: Dict[str, Any] = {"page": page, "page_size": page_size}
+        for key, value in (
+            ("severity", severity),
+            ("category", category),
+            ("status", status),
+            ("resolution", resolution),
+            ("finding_type_uid", finding_type_uid),
+            ("last_seen_gte", last_seen_gte),
+        ):
+            if value is not None:
+                params[key] = value
+        return await self._make_request(
+            "GET", f"hosts/{host_id}/findings/", params=params, api_version="v3.5"
+        )
+
+    async def get_finding_types(
+        self,
+        size: str = "regular",
+        page: int = 1,
+        page_size: int = 100,
+    ) -> Dict[str, Any]:
+        """Finding type catalogue. GET /api/v3.5/finding_types/
+
+        Required, not optional. A findings list embeds only
+        `FindingTypeSmallV3_5` — uid and name, nothing else — so **severity,
+        category, remediation and compliance_frameworks are not obtainable from
+        /findings/ at all** (confirmed live 2026-08-24: both severity and
+        category came back null on every finding). Callers that need them must
+        join on `finding_type.uid` against this catalogue.
+        """
+        return await self._make_request(
+            "GET",
+            "finding_types/",
+            params={"size": size, "page": page, "page_size": page_size},
+            api_version="v3.5",
+        )
+
+    async def get_finding_entities(
+        self,
+        finding_id: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """Entities carrying one finding — blast radius of a single exposure.
+
+        GET /api/v3.5/findings/{finding_id}/entities/
+        """
+        return await self._make_request(
+            "GET",
+            f"findings/{finding_id}/entities/",
+            params={"page": page, "page_size": page_size},
+            api_version="v3.5",
+        )
+
     async def search_by_name(self, name: str, entity_type: Optional[str] = None) -> Dict[str, Any]:
         """Search entities by name."""
         if entity_type == "account":

@@ -11,21 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from vectra_mcp_server.resources.investigation_resources import InvestigationResourceTools
-from vectra_mcp_server.tool.detection_tools import DetectionMCPTools
-from vectra_mcp_server.tool.entity_tools import EntityMCPTools
-from vectra_mcp_server.tool.investigation_tools import InvestigationMCPTools
-from vectra_mcp_server.tool.management_tools import ManagementMCPTools
-from vectra_mcp_server.tool.response_tools import ResponseMCPTools
-
-TOOL_CLASSES = (
-    DetectionMCPTools,
-    EntityMCPTools,
-    InvestigationMCPTools,
-    ManagementMCPTools,
-    ResponseMCPTools,
-    InvestigationResourceTools,
-)
+# Imported rather than redeclared. This file used to keep its own copy, which
+# meant a class could be added here and not to server.py (or the reverse) and
+# nothing would notice — the suite would simply stop covering the missing one.
+from vectra_mcp_server.registry import TOOL_CLASSES
 
 # Tools that change tenant state. Anything not listed here must be read-only.
 # Adding a tool to this set is a deliberate act; forgetting to is caught by
