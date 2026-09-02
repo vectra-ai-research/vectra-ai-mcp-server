@@ -6,6 +6,8 @@ from typing import Optional
 
 from mcp.types import ToolAnnotations
 
+from ..client_access import ClientHolder
+
 
 # ---------------------------------------------------------------------------
 # Tool behaviour annotations
@@ -94,20 +96,37 @@ def validate_detection_fields(value: Optional[str], param: str = "exclude_fields
         )
 
 
-class BaseMCPTools:
+class BaseMCPTools(ClientHolder):
     """Base class providing prefixed tool registration for multi-tenancy."""
 
-    def __init__(self, vectra_mcp, client, prefix: Optional[str] = None, tenant_label: Optional[str] = None):
+    def __init__(
+        self,
+        vectra_mcp,
+        client=None,
+        prefix: Optional[str] = None,
+        tenant_label: Optional[str] = None,
+        *,
+        client_provider=None,
+    ):
         """Initialize with FastMCP instance, Vectra client, and optional tenant prefix.
 
         Args:
             vectra_mcp: FastMCP server instance
-            client: VectraClient instance
+            client: VectraClient instance, resolved once. The historical form;
+                still what the server passes.
             prefix: Tool name prefix for multi-tenant mode (e.g., "prod")
             tenant_label: Human-readable tenant label for descriptions (e.g., "prod (https://prod.vectra.ai)")
+            client_provider: Keyword-only alternative to *client*: a
+                zero-argument callable resolved on every ``self.client``
+                access. This is what allows the active profile to change
+                without restarting the server. See ``client_access``.
+
+        *client* stays the second positional parameter, so every existing
+        ``cls(server, client, prefix=..., tenant_label=...)`` call site — the
+        server, the tool inventory script, and every test — is unaffected.
         """
         self.vectra_mcp = vectra_mcp
-        self.client = client
+        self._init_client(client=client, client_provider=client_provider)
         self.prefix = prefix
         self.tenant_label = tenant_label
 

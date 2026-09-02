@@ -1,21 +1,39 @@
 from typing import Optional, Literal, List, Dict, Any
 from pydantic import Field
 
+from ..client_access import ClientHolder
 
-class VectraMCPPrompts:
+
+class VectraMCPPrompts(ClientHolder):
     """Vectra AI MCP prompts for threat analysis and investigations."""
 
-    def __init__(self, vectra_mcp, client, prefix: Optional[str] = None, tenant_label: Optional[str] = None):
+    def __init__(
+        self,
+        vectra_mcp,
+        client=None,
+        prefix: Optional[str] = None,
+        tenant_label: Optional[str] = None,
+        *,
+        client_provider=None,
+    ):
         """Initialize with FastMCP instance, Vectra client, and optional tenant prefix.
 
         Args:
             vectra_mcp: FastMCP server instance
-            client: VectraClient instance
+            client: VectraClient instance, resolved once
             prefix: Prompt name prefix for multi-tenant mode (e.g., "prod")
             tenant_label: Human-readable tenant label for descriptions
+            client_provider: Keyword-only alternative to *client*, resolved on
+                every access. See ``client_access``.
+
+        Prompts share ``ClientHolder`` with the tool classes on purpose. A
+        version where tools resolve the tenant live and prompts keep the one
+        they were built with would send two halves of the same conversation to
+        two different tenants — and it is not the kind of split anybody thinks
+        to write a test for.
         """
         self.vectra_mcp = vectra_mcp
-        self.client = client
+        self._init_client(client=client, client_provider=client_provider)
         self.prefix = prefix
         self.tenant_label = tenant_label
 

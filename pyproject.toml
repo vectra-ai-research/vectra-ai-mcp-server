@@ -29,6 +29,12 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
+    # Profile credentials live in the OS keychain rather than in an MCP
+    # client's config file. A runtime dependency rather than an extra: `uvx`
+    # installs into a throwaway environment, so an extra would have to be named
+    # at every invocation and would be forgotten. The import is lazy, so a
+    # machine with no usable keychain backend still runs on env vars.
+    "keyring>=25.0",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +48,13 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.scripts]
+# Unchanged, and deliberately so: this is what every existing MCP client
+# configuration launches, usually with no arguments at all.
 vectra-ai-mcp-server = "vectra_mcp_server.server:main"
+# Profile management. A separate short script rather than subcommands on the
+# server entry point, so that adding subparsers can never change how a bare
+# `vectra-ai-mcp-server` invocation behaves.
+vectra-mcp = "vectra_mcp_server.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/vectra-ai-research/vectra-ai-mcp-server"
