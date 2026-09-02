@@ -47,7 +47,47 @@ uvx vectra-ai-mcp-server --help
 uvx --from git+https://github.com/vectra-ai-research/vectra-ai-mcp-server vectra-ai-mcp-server --help
 ```
 
-## MCP client configuration (single tenant)
+## MCP client configuration (named profiles — recommended)
+
+Named profiles keep your API secret in the **OS keychain** instead of in your MCP client's configuration file, and let you switch tenants with one command instead of editing JSON and remembering which credential belongs to which URL.
+
+Set up each tenant once:
+
+```bash
+vectra-mcp profile add acme          # prompts for tenant URL, client id, secret
+vectra-mcp profile add globex
+vectra-mcp profile use acme
+vectra-mcp profile list
+```
+
+`profile add` authenticates against the tenant before storing anything, so a wrong credential fails immediately rather than during an investigation.
+
+Then your MCP client config holds **no credentials at all**:
+
+```json
+{
+  "mcpServers": {
+    "vectra-ai-mcp": {
+      "command": "uvx",
+      "args": ["vectra-ai-mcp-server"]
+    }
+  }
+}
+```
+
+Switching customers becomes `vectra-mcp profile use globex` plus a restart of your MCP client. The config file never changes again.
+
+To pin one server entry to one tenant regardless of which profile is active — useful when you want two tenants connected at once — set `VECTRA_PROFILE`:
+
+```json
+"env": { "VECTRA_PROFILE": "acme" }
+```
+
+See [`docs/profiles.md`](docs/profiles.md) for the resolution order, the keychain layout, whether a restart is needed, and troubleshooting.
+
+## MCP client configuration (environment variables)
+
+Still fully supported, and unchanged — every existing deployment keeps working. Note that this writes your API secret in clear text into a file in your home directory, which is what profiles exist to avoid.
 
 Pass credentials via the `env` block of your MCP client config — `uvx` does not load `.env` for you.
 
@@ -68,6 +108,8 @@ Pass credentials via the `env` block of your MCP client config — `uvx` does no
 ```
 
 Pin a specific version with `uvx vectra-ai-mcp-server@0.2.0` (recommended for production setups).
+
+> **If you have both**, a profile wins. The server logs which source it used and which it ignored at startup, so a silent tenant switch is not possible — but do check that line the first time you add a profile to a machine that already had environment variables.
 
 ## MCP client configuration (multi-tenant)
 
@@ -520,10 +562,20 @@ The Docker container supports all the same environment variables as the local se
 
 ### MCP Server Configuration
 - `VECTRA_MCP_TRANSPORT`: Transport protocol (`stdio`, `sse`, or `streamable-http`) - default: `stdio`
-- `VECTRA_MCP_HOST`: Host to bind to for HTTP transports - default: `0.0.0.0`
+- `VECTRA_MCP_HOST`: Host to bind to for HTTP transports - default: `127.0.0.1`
 - `VECTRA_MCP_PORT`: Port for HTTP transports - default: `8000`
 - `VECTRA_MCP_DEBUG`: Enable debug logging - default: `false`
 - `VECTRA_CONFIG_FILE`: Path to YAML config file for multi-tenant mode (optional)
+- `VECTRA_PROFILE`: Name of a local profile to pin this instance to (optional; see [`docs/profiles.md`](docs/profiles.md))
+
+> **The bind default changed to loopback.** Neither HTTP transport
+> authenticates its callers, so anyone who can reach the port can use the
+> server's Vectra credentials. The Docker examples above set
+> `VECTRA_MCP_HOST=0.0.0.0` explicitly, which is correct and still required —
+> a container must bind all interfaces to be reachable through a published
+> port, and the container boundary is what limits exposure. Outside a
+> container, bind a non-loopback address only behind your own authenticating
+> proxy; the server logs a warning when you do.
 
 ### Multi-Tenant Override Variables
 When using a YAML config file, per-tenant settings can be overridden via environment variables:
