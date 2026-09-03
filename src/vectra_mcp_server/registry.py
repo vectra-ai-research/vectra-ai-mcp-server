@@ -20,6 +20,7 @@ from .tool.entity_tools import EntityMCPTools
 from .tool.findings_tools import FindingsMCPTools
 from .tool.investigation_tools import InvestigationMCPTools
 from .tool.management_tools import ManagementMCPTools
+from .tool.report_tools import ReportMCPTools
 from .tool.response_tools import ResponseMCPTools
 
 #: Every class exposing MCP tools, in registration order. Each takes
@@ -30,6 +31,7 @@ TOOL_CLASSES = (
     FindingsMCPTools,
     InvestigationMCPTools,
     ManagementMCPTools,
+    ReportMCPTools,
     ResponseMCPTools,
     InvestigationResourceTools,
 )
