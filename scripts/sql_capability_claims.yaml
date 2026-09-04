@@ -18,7 +18,7 @@
 meta:
   reference: src/vectra_mcp_server/resources/sql_reference.md
   # Bump when a claim is added, changed, or retired.
-  revision: 3
+  revision: 4
   # Set only by a run where every claim held — no broken, no newly permitted,
   # no indeterminate. Two array claims currently time out, so this stays null
   # until they can reach a verdict.
@@ -287,6 +287,52 @@ claims:
         AND id.orig_h IN (SELECT id.orig_h FROM network.isession._all
           WHERE timestamp > date_add('hour', -1, now()) LIMIT 5) LIMIT 1
     expect: success
+
+  # ---------------------------------------------------------------
+  # Time windows — the current_date class of bug
+  # ---------------------------------------------------------------
+  - id: current-date-rejected
+    claim: current_date is not a keyword in this dialect
+    section: "3.6"
+    why: >-
+      query-construction.md documented the Azure CP day-level window as
+      date_add('day', -N, current_date) and all five azurecp recipes copied
+      it, so none of them could ever run — the parser rejects current_date
+      before the query reaches a table. If this claim stops holding,
+      current_date has been added to the grammar and the day-level guidance
+      may be relaxed.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE dt > date_add('day', -1, current_date) LIMIT 1
+    expect: error
+    error_name: SYNTAX_ERROR
+
+  - id: day-window-now
+    claim: date_add('day', -N, now()) is the working day-level window
+    section: "3.6"
+    why: >-
+      The replacement for current_date above. Must be known to work — every
+      azurecp recipe now depends on it. Carries dt and timestamp together
+      because that is the form the recipes use.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE dt > date_add('day', -1, now())
+        AND timestamp BETWEEN date_add('day', -1, now()) AND now() LIMIT 1
+    expect: success
+    poll_timeout: 180
+
+  - id: date-now-truncation
+    claim: DATE(NOW()) is the working midnight-truncation idiom
+    section: "3.6"
+    why: >-
+      Offered in query-construction.md as the alternative when a caller wants
+      the window truncated to midnight rather than to the current time. It is
+      the thing to reach for instead of current_date, so it has to be real.
+    query: >-
+      SELECT timestamp FROM network.dns._all
+      WHERE timestamp > date_add('day', -1, DATE(NOW())) LIMIT 1
+    expect: success
+    poll_timeout: 180
 
   # ---------------------------------------------------------------
   # Table existence contradictions

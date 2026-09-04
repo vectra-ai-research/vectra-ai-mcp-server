@@ -304,7 +304,7 @@ SELECT
 FROM network.dns._all
 WHERE qtype_name = 'TXT'
   AND LENGTH(query) > 50
-  AND timestamp BETWEEN date_add('day', -7, now()) AS now()
+  AND timestamp BETWEEN date_add('day', -7, now()) AND now()
 GROUP BY id.orig_h, orig_hostname, query
 HAVING count(*) > 10
 ORDER BY "avg_query_length" DESC
