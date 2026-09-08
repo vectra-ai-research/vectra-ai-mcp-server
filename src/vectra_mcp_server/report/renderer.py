@@ -206,15 +206,52 @@ def _need(obj, key, where):
 
 
 def _validate_decisions(case: dict) -> list:
-    """Check the decision tree. Raise for unrenderable, warn for unreviewable.
+    """Check the decision tree, and enforce THE FLOOR.
 
     The tree exists so that disagreement has an address. An analyst can only
     reject a whole verdict today; with node IDs they can say "D4 is wrong",
     which is a sentence that survives into a ticket and a handover.
 
-    The refusals here are the ones that would make the tree misleading rather
-    than merely thin — a duplicate ID means two judgements answer to the same
-    name, and a dependency cycle means the reader cannot find the bottom.
+    THE FLOOR, and why these are refusals
+    -------------------------------------
+    A customer chooses their own reasoning layer. Two customers on two layers
+    must not receive reports of incomparable quality and blame the platform for
+    it, so the minimum is enforced *here*, in the server, where no reasoning
+    layer can negotiate with it.
+
+    Measured, not assumed. One entity, two layers, identical prompt. One layer
+    produced a two-node tree and satisfied:
+
+        would_change_if   REFUSED if absent    2 of 2 nodes
+        rests_on          warned only          0 of 2
+        load_bearing      warned only          0 of 2
+        satisfies         warned only          0 of 2
+
+    **Refusals get complied with. Warnings get ignored.** That is not a
+    criticism of a model: a refusal blocks the task, so the agent fixes the
+    field and calls again, while advisory text costs nothing to skip. The
+    lesson is about where a guarantee belongs, not about whose model is better.
+
+    So the floor is:
+
+    1. ``would_change_if`` on every node — a judgement whose author cannot name
+       what would overturn it was an assumption, not a judgement.
+    2. ``rests_on`` on every node — a judgement a reader cannot trace is an
+       opinion.
+    3. At least one ``load_bearing`` node — otherwise the verdict never says
+       what it rests on.
+    4. Every workflow rule carrying a status — an undeclared rule is
+       indistinguishable from a skipped one.
+
+    All four are cheap to satisfy honestly and impossible to satisfy by
+    accident. **None of them requires the investigation to be good.** Depth of
+    insight stays variable across layers and no schema fixes that; what the
+    floor guarantees is narrower and still worth having — every report is
+    decomposed, traceable, and explicit about its own gaps.
+
+    The structural refusals are separate from the floor and older: a duplicate
+    ID means two judgements answer to one name, and a dependency cycle means
+    the reader cannot find the bottom.
     """
     warnings = []
     decisions = case.get("decisions")
@@ -283,11 +320,14 @@ def _validate_decisions(case: dict) -> list:
                     f"rule. Use one of {', '.join(sorted(RULES))}"
                 )
 
+        # Refused, not warned. See THE FLOOR at the top of this function.
         if not node.get("rests_on"):
-            warnings.append(
-                f"decision {node_id} cites no provenance in rests_on — a "
+            raise CaseError(
+                f"{where} ({node_id}) cites no provenance in rests_on. A "
                 f"judgement a reader cannot trace to a detection or a tool call "
-                f"is an opinion"
+                f"is an opinion. Name the detection IDs or tool calls it rests "
+                f"on — and if it rests on reasoning over other decisions, cite "
+                f"those in depends_on and the evidence they rest on here"
             )
 
     # Dependencies must resolve, and must not loop.
@@ -312,11 +352,13 @@ def _validate_decisions(case: dict) -> list:
 
     load = [n for n in decisions if n.get("load_bearing")]
     if not load:
-        warnings.append(
-            "no decision is marked load_bearing — the report does not say which "
-            "judgements the verdict actually rests on"
+        raise CaseError(
+            "no decision is marked load_bearing. The report would state a "
+            "verdict without saying which judgements it rests on, which is the "
+            "one thing a reviewer needs first. Mark the nodes that would change "
+            "the verdict if they were wrong — usually one to three of them"
         )
-    elif len(load) > 4:
+    if len(load) > 4:
         warnings.append(
             f"{len(load)} decisions are marked load_bearing; if most of the tree "
             f"is load-bearing the grading tells a reader nothing"
@@ -341,18 +383,15 @@ def _validate_decisions(case: dict) -> list:
     # never said which. An undeclared rule is indistinguishable from a skipped
     # one, which is exactly why silence has to be called out rather than
     # rendered as a neutral blank.
-    accounted = [r for r in coverage_table(case) if r["status"]]
-    if not accounted:
-        warnings.append(
-            "no workflow rule is accounted for — every rule renders as 'Not "
-            "reported', so a reader cannot tell a skipped check from one that "
-            "ran and found nothing. Tag decisions with `satisfies`, and use "
-            "`coverage` for rules that produced no decision"
-        )
-    elif len(accounted) < 3:
-        warnings.append(
-            f"only {len(accounted)} of {len(RULES)} workflow rules are accounted "
-            f"for; the rest render as 'Not reported'"
+    rows = coverage_table(case)
+    unaccounted = [r["rule"] for r in rows if not r["status"]]
+    if unaccounted:
+        raise CaseError(
+            "these workflow rules carry no status: " + ", ".join(unaccounted) +
+            ". Every rule is accounted for, because an undeclared rule is "
+            "indistinguishable from a skipped one. Tag the decision that acted "
+            "on each rule with `satisfies`, or state it in `coverage` — "
+            "'not run' and 'n/a' are good answers, silence is not"
         )
 
     return warnings

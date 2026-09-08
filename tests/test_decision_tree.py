@@ -43,6 +43,11 @@ BASE = {
     "verdict": {"code": "TP-High"},
     "answer": "Compromised host, C2 then lateral movement.",
     "next_action": "Escalate to IR.",
+    # Non-empty so the baseline is warning-free and `validate(c) == []` means
+    # something. Empty timeline/evidence warn, for reasons unrelated to the
+    # decision tree.
+    "timeline": [{"title": "C2 established", "grade": "decisive", "provenance": "19768"}],
+    "evidence": [{"id": "19768", "what": "Hidden HTTPS Tunnel", "grade": "decisive"}],
 }
 
 NODE = {
@@ -57,9 +62,28 @@ NODE = {
 }
 
 
+#: Every rule carrying a status, which the floor requires. Tests that are not
+#: about coverage get this by default so each one exercises a single thing.
+ALL_RULES = {r: "n/a" for r in RULES}
+
+
 def case(**kw):
+    """A case that clears the floor, unless the test deliberately breaks it.
+
+    Pass ``coverage=None`` to opt out and leave the rules unaccounted — that
+    is how the coverage refusal itself gets tested.
+    """
+    auto_coverage = "coverage" not in kw
     c = dict(BASE)
     c.update(kw)
+    if c.get("decisions") and auto_coverage:
+        # Fill only the rules no decision claims, so a test about derivation
+        # from `satisfies` still sees it derive. Explicit coverage outranks a
+        # satisfies tag, so blanket-filling would mask that.
+        claimed = {r for n in c["decisions"] for r in (n.get("satisfies") or [])}
+        c["coverage"] = {r: "n/a" for r in RULES if r not in claimed}
+    if c.get("coverage") is None:
+        c.pop("coverage", None)
     return c
 
 
@@ -160,11 +184,13 @@ def test_depth_orders_the_output_parents_before_children():
 
 # ------------------------------------------------------------- guard vs theatre
 
-def test_no_load_bearing_node_warns():
-    """Twelve nodes of trivia burying the two that matter is worse than no
-    tree. The report has to say which judgements the verdict rests on."""
-    w = warnings_for(decisions=[node(load_bearing=False)])
-    assert any("load_bearing" in x for x in w)
+def test_no_load_bearing_node_is_refused():
+    """Part of the floor. Twelve nodes of trivia burying the two that matter is
+    worse than no tree, and a verdict that never says what it rests on is the
+    thing a reviewer needs first."""
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[node(load_bearing=False)]))
+    assert "load_bearing" in str(exc.value)
 
 
 def test_too_many_load_bearing_nodes_warns():
@@ -180,10 +206,12 @@ def test_a_load_bearing_node_at_low_confidence_warns_loudly():
     assert any("soft" in x for x in w)
 
 
-def test_a_node_without_provenance_warns():
+def test_a_node_without_provenance_is_refused():
+    """Part of the floor. A judgement a reader cannot trace is an opinion."""
     bare = {k: v for k, v in NODE.items() if k != "rests_on"}
-    w = warnings_for(decisions=[bare])
-    assert any("provenance" in x for x in w)
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[bare]))
+    assert "rests_on" in str(exc.value)
 
 
 def test_a_case_with_no_decisions_warns_that_it_will_become_required():
@@ -193,35 +221,39 @@ def test_a_case_with_no_decisions_warns_that_it_will_become_required():
     assert any("decisions" in x and "required" in x for x in w)
 
 
-def test_zero_coverage_warns():
-    """The louder signal, and it was missing from the first cut.
-
-    A real run produced a two-node tree whose nodes named no rules and whose
-    case file had no coverage block. All seven rules rendered "Not reported"
-    and nothing warned. The report understated its own investigation, which
-    had populated sweep and ruled-out sections.
+def test_an_unaccounted_rule_is_refused_and_named():
+    """Part of the floor. An undeclared rule is indistinguishable from a
+    skipped one, and a report claiming no rules understates its own work — a
+    real run had populated sweep and ruled-out sections while naming none.
     """
-    w = warnings_for(decisions=[node(satisfies=[])])
-    assert any("no workflow rule is accounted for" in x for x in w)
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[node(satisfies=["R1"])], coverage=None))
+    message = str(exc.value)
+    for rule in RULES:
+        assert (rule in message) is (rule != "R1"), f"{rule} listed wrongly"
 
 
-def test_thin_coverage_warns_with_a_count():
-    w = warnings_for(decisions=[node(satisfies=["R1"])])
-    assert any("only 1 of 7" in x for x in w)
+def test_not_run_and_na_satisfy_the_requirement():
+    """"not run" is a good answer; silence is not. The floor asks for a
+    status, never for a particular one."""
+    c = case(decisions=[node(satisfies=["R1"])],
+             coverage={"R2": "not run", "R3": {"status": "n/a", "detail": "cloud-only rule"},
+                       "R4": "partial", "R5": "done", "R6": "done", "R7": "not run"})
+    assert validate(c) == []
 
 
-def test_adequate_coverage_does_not_warn():
-    c = case(decisions=[node(satisfies=["R1", "R2"])],
-             coverage={"R3": "done", "R4": "partial"})
-    assert not any("accounted for" in x or "of 7" in x for x in validate(c))
+def test_satisfies_tags_alone_can_cover_every_rule():
+    c = case(decisions=[node(satisfies=sorted(RULES))])
+    assert validate(c) == []
 
 
-def test_the_codex_shaped_case_now_warns_on_every_count():
+def test_the_thin_shaped_case_is_now_refused_outright():
     """Regression for the exact shape a real run produced: two verdict-level
     nodes, no provenance, nothing load-bearing, no rules named.
 
-    Every one of those is now called out on the page rather than only the
-    load_bearing one.
+    It rendered, with warnings nobody was obliged to act on. Now it cannot be
+    rendered at all — which is the point, since the measured behaviour was
+    that refusals get fixed and warnings get ignored.
     """
     thin = [
         {"id": "D1", "question": "Does the evidence support a benign explanation?",
@@ -229,12 +261,53 @@ def test_the_codex_shaped_case_now_warns_on_every_count():
         {"id": "D2", "question": "Should the entity be escalated?",
          "concluded": "Yes — TP-High", "would_change_if": "Primary evidence is shown to be synthetic"},
     ]
-    w = validate(case(decisions=thin))
-    assert any("D1 cites no provenance" in x for x in w)
-    assert any("D2 cites no provenance" in x for x in w)
-    assert any("load_bearing" in x for x in w)
-    assert any("no workflow rule is accounted for" in x for x in w)
-    assert len(w) >= 4
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=thin))
+    # Refused on the first floor breach it meets, which is provenance.
+    assert "rests_on" in str(exc.value)
+
+
+def test_the_floor_is_reachable_one_fix_at_a_time():
+    """The repair loop has to terminate.
+
+    Each refusal names exactly one thing to fix, and fixing it advances to the
+    next. An agent facing a tool that only ever says "no" without saying what
+    to change would spin forever, which is the failure this asserts against.
+    The measured behaviour is that agents do fix named refusals — this is what
+    makes that safe to rely on.
+    """
+    n = {"id": "D1", "question": "q", "concluded": "c"}
+    seen = []
+
+    # 1. no falsifier
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[n], coverage=None))
+    seen.append("would_change_if" in str(exc.value))
+    n["would_change_if"] = "The destination resolves into a sanctioned range"
+
+    # 2. no provenance
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[n], coverage=None))
+    seen.append("rests_on" in str(exc.value))
+    n["rests_on"] = ["19768"]
+
+    # 3. nothing load-bearing
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[n], coverage=None))
+    seen.append("load_bearing" in str(exc.value))
+    n["load_bearing"] = True
+
+    # 4. rules unaccounted
+    with pytest.raises(CaseError) as exc:
+        validate(case(decisions=[n], coverage=None))
+    seen.append("R1" in str(exc.value))
+
+    assert seen == [True, True, True, True], f"refusal order drifted: {seen}"
+
+    # Four named fixes, and it renders.
+    c = case(decisions=[n], coverage=dict(ALL_RULES))
+    assert validate(c) == []
+    assert render(c, [])
 
 
 # ------------------------------------------------------------------ vocabulary
@@ -303,19 +376,24 @@ def _coverage_section(out: str) -> str:
     return out[start:out.index("</table>", start)]
 
 
-def test_a_rule_with_neither_renders_as_not_reported():
-    """The distinction the table exists for. A skipped check becomes a visible
-    row rather than an absence nobody notices — silence is otherwise
-    indistinguishable from a rule that ran and found nothing.
-    """
-    c = case(decisions=[node(satisfies=["R1"])])
-    rows = {r["rule"]: r for r in coverage_table(c)}
-    assert rows["R1"]["status"] == "done"
-    unreported = [r for r in RULES if rows[r]["status"] is None]
-    assert len(unreported) == len(RULES) - 1
+def test_an_unaccounted_rule_can_never_reach_a_rendered_report():
+    """`coverage_table` still models the unreported state, and the floor makes
+    it unreachable through the tool.
 
-    out = render(c, validate(c))
-    assert _coverage_section(out).count("Not reported") == len(RULES) - 1
+    Both halves matter. The table is a public function and has to describe a
+    partial case honestly; the floor is what stops such a case becoming a
+    document a customer reads and mis-reads.
+    """
+    partial = case(decisions=[node(satisfies=["R1"])], coverage=None)
+
+    rows = {r["rule"]: r for r in coverage_table(partial)}
+    assert rows["R1"]["status"] == "done"
+    assert [r for r in RULES if rows[r]["status"] is None] == [
+        r for r in RULES if r != "R1"
+    ]
+
+    with pytest.raises(CaseError):
+        validate(partial)
 
 
 def test_every_workflow_rule_appears_in_the_table():
@@ -335,7 +413,9 @@ def test_a_bare_string_coverage_value_is_accepted():
 
 @pytest.mark.parametrize("status", sorted(COVERAGE_STATUS))
 def test_each_coverage_status_renders_with_a_label(status):
-    c = case(decisions=[NODE], coverage={"R3": {"status": status}})
+    cov = dict(ALL_RULES)
+    cov["R3"] = {"status": status}
+    c = case(decisions=[NODE], coverage=cov)
     out = render(c, validate(c))
     assert COVERAGE_STATUS[status][0] in out
 
@@ -382,6 +462,7 @@ def test_hostile_decision_text_cannot_become_markup():
         "rests_on": ["<b>"],
         "considered": [{"alternative": "<iframe src=javascript:1>",
                         "rejected_because": "<a onclick=1>"}],
+        "load_bearing": True,
     }
     c = case(decisions=[hostile])
     out = render(c, validate(c))
