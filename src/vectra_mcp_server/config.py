@@ -76,7 +76,12 @@ class VectraConfig(BaseSettings):
 
     # Logging Configuration
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-    log_format: str = Field(default="json", alias="LOG_FORMAT")
+    # Default corrected from "json" to "text". The value was validated here and
+    # then never passed to setup_logging(), so every release to date has emitted
+    # text regardless. Now that it is wired up, keeping "json" as the default
+    # would have changed the log format of every existing deployment on upgrade.
+    # The declared default now matches the behaviour that actually shipped.
+    log_format: str = Field(default="text", alias="LOG_FORMAT")
 
     # Development Configuration
     dev_mode: bool = Field(default=False, alias="DEV_MODE")
