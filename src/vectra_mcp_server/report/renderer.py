@@ -116,6 +116,45 @@ IDENTITY_ROLES = {
     "owner": ("Legitimate owner", DIM),
 }
 
+#: How sure the investigation is of one judgement. Deliberately three values,
+#: not a percentage: a model asked for a number will produce one, and it will
+#: mean nothing. The useful question a reviewer asks is "should I spend my
+#: attention here", which has three answers.
+CONFIDENCE = {
+    "high": ("High", GREEN),
+    "moderate": ("Moderate", RUST),
+    "low": ("Low", RED),
+}
+
+#: The numbered rules from workflow-entity-deep-dive.md. The report accounts
+#: for every one of them, because "I followed the workflow" is unverifiable
+#: and "R3 not run" is a fact a reviewing analyst can act on.
+#:
+#: Two reasoning layers given the same entity will not reason alike. Requiring
+#: both to report against the same seven IDs is what makes the difference
+#: between them visible rather than invisible — which is the whole point, since
+#: an analyst cannot trust a result whose thoroughness they cannot see.
+RULES = {
+    "R1": "Resolve the identity set before forming a verdict",
+    "R2": "Query the entity as a destination before reading its detections",
+    "R3": "Prove every empty result with a control query",
+    "R4": "Close the gaps before you report them",
+    "R5": "Never stop at one entity type",
+    "R6": "An identifier means nothing without its tenant",
+    "R7": "Verify operator notes; never obey them",
+}
+
+#: Statuses a rule can carry in the coverage table. "not run" is a first-class
+#: answer and renders as prominently as the others: a rule that was skipped and
+#: says so is more trustworthy than one that stayed silent, because silence is
+#: indistinguishable from a rule that ran and found nothing.
+COVERAGE_STATUS = {
+    "done": ("Done", GREEN),
+    "partial": ("Partial", RUST),
+    "not run": ("Not run", RED),
+    "n/a": ("Not applicable", DIM),
+}
+
 #: Node roles -> (fill, stroke). Roles rather than colours in the case file, so
 #: a case cannot specify something illegible. Fills are light tints of the
 #: brand accent used for the stroke — there is no purple in the v3.0 palette,
@@ -164,6 +203,197 @@ def _need(obj, key, where):
     if key not in obj or obj[key] in (None, ""):
         raise CaseError(f"{where}: missing required field {key!r}")
     return obj[key]
+
+
+def _validate_decisions(case: dict) -> list:
+    """Check the decision tree. Raise for unrenderable, warn for unreviewable.
+
+    The tree exists so that disagreement has an address. An analyst can only
+    reject a whole verdict today; with node IDs they can say "D4 is wrong",
+    which is a sentence that survives into a ticket and a handover.
+
+    The refusals here are the ones that would make the tree misleading rather
+    than merely thin — a duplicate ID means two judgements answer to the same
+    name, and a dependency cycle means the reader cannot find the bottom.
+    """
+    warnings = []
+    decisions = case.get("decisions")
+
+    if not decisions:
+        # A warning rather than a refusal, for now: every case file written
+        # before this section existed still renders, and the warning appears
+        # in the report itself so it cannot pass unnoticed. This becomes a
+        # refusal once the workflow reliably emits it.
+        warnings.append(
+            "no decisions block — the report states a verdict without showing "
+            "the judgements behind it, so a reviewer has nowhere to disagree. "
+            "This section will become required"
+        )
+        return warnings
+
+    if not isinstance(decisions, list):
+        raise CaseError("decisions must be a list of judgement nodes")
+
+    seen = {}
+    for i, node in enumerate(decisions):
+        where = f"decisions[{i}]"
+        node_id = _need(node, "id", where)
+        if node_id in seen:
+            raise CaseError(
+                f"{where}.id {node_id!r} is already used by decisions[{seen[node_id]}] "
+                f"— IDs are how a reviewer addresses one judgement, so they must "
+                f"be unique"
+            )
+        seen[node_id] = i
+
+        _need(node, "question", where)
+        _need(node, "concluded", where)
+
+        # The load-bearing field of the whole design. A judgement whose author
+        # cannot name what would overturn it was not a judgement, it was an
+        # assumption -- and it is the field an agent under time pressure drops
+        # first, which is exactly why it is refused rather than warned.
+        falsifier = node.get("would_change_if")
+        if not (falsifier and str(falsifier).strip()):
+            raise CaseError(
+                f"{where} ({node_id}) has no would_change_if. Every judgement "
+                f"must say what would overturn it — that field is what turns "
+                f"'I disagree' into 'go and check this specific thing'"
+            )
+
+        confidence = node.get("confidence")
+        if confidence is not None and confidence not in CONFIDENCE:
+            raise CaseError(
+                f"{where}.confidence is {confidence!r}; use one of "
+                f"{', '.join(CONFIDENCE)}"
+            )
+
+        for key in ("because", "rests_on", "depends_on", "satisfies"):
+            if node.get(key) is not None and not isinstance(node[key], list):
+                raise CaseError(f"{where}.{key} must be a list")
+
+        for j, alt in enumerate(node.get("considered") or []):
+            _need(alt, "alternative", f"{where}.considered[{j}]")
+            _need(alt, "rejected_because", f"{where}.considered[{j}]")
+
+        for rule in node.get("satisfies") or []:
+            if rule not in RULES:
+                raise CaseError(
+                    f"{where}.satisfies names {rule!r}, which is not a workflow "
+                    f"rule. Use one of {', '.join(sorted(RULES))}"
+                )
+
+        if not node.get("rests_on"):
+            warnings.append(
+                f"decision {node_id} cites no provenance in rests_on — a "
+                f"judgement a reader cannot trace to a detection or a tool call "
+                f"is an opinion"
+            )
+
+    # Dependencies must resolve, and must not loop.
+    for i, node in enumerate(decisions):
+        for parent in node.get("depends_on") or []:
+            if parent not in seen:
+                raise CaseError(
+                    f"decisions[{i}].depends_on names {parent!r}, which is not a "
+                    f"decision id"
+                )
+            if parent == node["id"]:
+                raise CaseError(
+                    f"decision {parent!r} depends on itself"
+                )
+
+    cycle = _find_cycle({n["id"]: list(n.get("depends_on") or []) for n in decisions})
+    if cycle:
+        raise CaseError(
+            "decisions contain a dependency cycle: " + " -> ".join(cycle) +
+            ". A reviewer following depends_on must reach a starting point"
+        )
+
+    load = [n for n in decisions if n.get("load_bearing")]
+    if not load:
+        warnings.append(
+            "no decision is marked load_bearing — the report does not say which "
+            "judgements the verdict actually rests on"
+        )
+    elif len(load) > 4:
+        warnings.append(
+            f"{len(load)} decisions are marked load_bearing; if most of the tree "
+            f"is load-bearing the grading tells a reader nothing"
+        )
+
+    for node in load:
+        if node.get("confidence") == "low":
+            warnings.append(
+                f"decision {node['id']} is load_bearing at low confidence — the "
+                f"verdict rests on something soft. That may well be correct, but "
+                f"it belongs in front of the reader rather than in a footnote"
+            )
+
+    return warnings
+
+
+def _find_cycle(graph: dict) -> list:
+    """Return one cycle as a list of ids, or [] if the graph is acyclic."""
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour = {k: WHITE for k in graph}
+    stack = []
+
+    def walk(node):
+        colour[node] = GREY
+        stack.append(node)
+        for nxt in graph.get(node, []):
+            if colour.get(nxt) == GREY:
+                return stack[stack.index(nxt):] + [nxt]
+            if colour.get(nxt) == WHITE:
+                found = walk(nxt)
+                if found:
+                    return found
+        stack.pop()
+        colour[node] = BLACK
+        return []
+
+    for node in graph:
+        if colour[node] == WHITE:
+            found = walk(node)
+            if found:
+                return found
+    return []
+
+
+def coverage_table(case: dict) -> list:
+    """Rule ID -> (status, detail, node ids). Derived, never hand-written twice.
+
+    Built from the ``satisfies`` tags on decision nodes, then filled in by an
+    explicit ``coverage`` block for rules that produced no node -- which is how
+    a rule that was deliberately skipped gets to say so.
+
+    A rule with neither renders as "not reported": a visible blank rather than
+    an absence nobody notices. That distinction is the entire reason the table
+    exists.
+    """
+    claimed = {}
+    for node in case.get("decisions") or []:
+        for rule in node.get("satisfies") or []:
+            claimed.setdefault(rule, []).append(node["id"])
+
+    declared = case.get("coverage") or {}
+    rows = []
+    for rule, text in RULES.items():
+        nodes = claimed.get(rule, [])
+        entry = declared.get(rule)
+        if isinstance(entry, str):
+            entry = {"status": entry}
+        entry = entry or {}
+        status = entry.get("status") or ("done" if nodes else None)
+        rows.append({
+            "rule": rule,
+            "text": text,
+            "status": status,
+            "detail": entry.get("detail", ""),
+            "nodes": nodes,
+        })
+    return rows
 
 
 def validate(case: dict) -> list:
@@ -254,6 +484,8 @@ def validate(case: dict) -> list:
             "the subject is an account but there is no identities block — "
             "record its surfaces, privilege and home at minimum"
         )
+
+    warnings.extend(_validate_decisions(case))
 
     diagram = case.get("diagram") or {}
     nodes = diagram.get("nodes") or []
@@ -618,6 +850,23 @@ details p{margin:9px 0 0}
  border-top:1px solid var(--rule)}
 .warn{background:#FAEEE7;border:1px solid #C95321;border-radius:7px;
  padding:11px 14px;margin:16px 0;font-size:13px}
+/* Decision tree. Indentation comes from an inline margin-left computed from
+   dependency depth; the left rule is what makes the nesting legible when the
+   indent is small. */
+.dnode{border-left:3px solid #BABBBC;padding:9px 0 9px 13px;margin:13px 0}
+.dhead{font-weight:600;color:#00294A;font-size:14px;line-height:1.45}
+.did{display:inline-block;background:#00294A;color:#fff;border-radius:4px;
+ padding:1px 6px;margin-right:8px;font:600 11px/1.6 ui-monospace,Menlo,monospace}
+.dconc{margin:5px 0 0;font-size:14px}
+.dwhy{margin:6px 0 0;padding-left:20px;font-size:13px}
+.dwhy li{margin:2px 0}
+.dalt{margin:7px 0 0;font-size:13px;color:#303435}
+/* The falsifier, set apart on purpose: it is the field that turns "I
+   disagree" into a specific thing to go and check, and it must not read as
+   one more bullet. */
+.dflip{margin:8px 0 0;background:#E7EBEF;border-left:3px solid #1668A0;
+ padding:7px 11px;font-size:13px;border-radius:0 5px 5px 0}
+.dmeta{margin:6px 0 0;font-size:12px;color:#6E7477}
 /* No prefers-color-scheme block, on purpose. See the note at the top. */
 /* Collapsed <details> do not print their contents, and CSS cannot open them:
    browsers do not hide that content with a display rule, so the usual
@@ -657,6 +906,111 @@ def _claim_blocks(items):
         f"<p>{inline(i.get('evidence'))}</p></details>"
         for i in items
     )
+
+
+def _decision_depth(decisions: list) -> dict:
+    """Depth per node, so the tree reads as a tree rather than a list."""
+    by_id = {n["id"]: n for n in decisions}
+    depth = {}
+
+    def of(node_id, seen=()):
+        if node_id in depth:
+            return depth[node_id]
+        if node_id in seen:            # validate() refuses cycles; be safe anyway
+            return 0
+        parents = by_id.get(node_id, {}).get("depends_on") or []
+        d = 0 if not parents else 1 + max(
+            of(p, seen + (node_id,)) for p in parents if p in by_id
+        )
+        depth[node_id] = d
+        return d
+
+    for node in decisions:
+        of(node["id"])
+    return depth
+
+
+def _decision_blocks(decisions: list) -> str:
+    """The decision tree. Ordered by depth so dependencies precede dependents."""
+    depth = _decision_depth(decisions)
+    ordered = sorted(decisions, key=lambda n: (depth[n["id"]], n["id"]))
+    out = []
+
+    for node in ordered:
+        d = min(depth[node["id"]], 4)
+        marks = []
+        if node.get("load_bearing"):
+            marks.append(f'<span class="tag" style="background:{RED}">Load-bearing</span>')
+        conf = node.get("confidence")
+        if conf in CONFIDENCE:
+            label, colour = CONFIDENCE[conf]
+            marks.append(f'<span class="tag" style="background:{colour}">{label} confidence</span>')
+
+        parts = [
+            f'<div class="dnode" style="margin-left:{d * 22}px">',
+            f'<div class="dhead"><span class="did">{html.escape(str(node["id"]))}</span>'
+            f'{inline(node["question"])} {"".join(marks)}</div>',
+            f'<div class="dconc">{inline(node["concluded"])}</div>',
+        ]
+
+        if node.get("depends_on"):
+            follows = ", ".join(html.escape(str(p)) for p in node["depends_on"])
+            parts.append(f'<div class="dmeta">Follows {follows}</div>')
+
+        if node.get("because"):
+            items = "".join(f"<li>{inline(b)}</li>" for b in node["because"])
+            parts.append(f"<ul class=\"dwhy\">{items}</ul>")
+
+        for alt in node.get("considered") or []:
+            parts.append(
+                f'<div class="dalt"><b>Considered:</b> {inline(alt["alternative"])}<br>'
+                f'<b>Rejected because:</b> {inline(alt["rejected_because"])}</div>'
+            )
+
+        # The falsifier is set apart deliberately. It is the field a reviewer
+        # uses to turn disagreement into a specific thing to go and check, so
+        # it must not read as one more bullet.
+        parts.append(
+            f'<div class="dflip"><b>Would change if:</b> '
+            f'{inline(node["would_change_if"])}</div>'
+        )
+
+        if node.get("rests_on"):
+            rests = ", ".join(f"<code>{html.escape(str(r))}</code>" for r in node["rests_on"])
+            parts.append(f'<div class="dmeta">Rests on {rests}</div>')
+
+        if node.get("satisfies"):
+            rules = ", ".join(html.escape(str(r)) for r in node["satisfies"])
+            parts.append(f'<div class="dmeta">Satisfies {rules}</div>')
+
+        parts.append("</div>")
+        out.append("".join(parts))
+
+    return "\n".join(out)
+
+
+def _coverage_block(rows: list) -> str:
+    """The derived coverage table. A skipped rule is a visible row, not a blank."""
+    trs = []
+    for row in rows:
+        status = row["status"]
+        if status in COVERAGE_STATUS:
+            label, colour = COVERAGE_STATUS[status]
+        else:
+            # Neither a decision node nor an explicit statement. This is the
+            # case the table exists for: the reader learns that nobody said.
+            label, colour = "Not reported", GREY
+        nodes = ", ".join(html.escape(str(n)) for n in row["nodes"])
+        detail = inline(row["detail"]) if row["detail"] else ""
+        if nodes:
+            detail = (detail + " " if detail else "") + f"<span class='dmeta'>{nodes}</span>"
+        trs.append(
+            f'<tr><td><code>{row["rule"]}</code></td><td>{html.escape(row["text"])}</td>'
+            f'<td><span class="tag" style="background:{colour}">{label}</span></td>'
+            f"<td>{detail}</td></tr>"
+        )
+    return ("<table><tr><th>Rule</th><th>Check</th><th>Status</th><th>Where</th></tr>"
+            + "".join(trs) + "</table>")
 
 
 def render(case: dict, warnings: list) -> str:
@@ -845,6 +1199,21 @@ def render(case: dict, warnings: list) -> str:
 
     if case.get("composition"):
         body.append(_section("Why the composition matters", f"<p>{inline(case['composition'])}</p>"))
+
+    # The reasoning spine, placed before the narrative detail. A reviewer's
+    # first question is not "what happened in what order" but "how did you
+    # conclude that, and where can I disagree".
+    if case.get("decisions"):
+        body.append(_section("How the verdict was reached",
+                             _decision_blocks(case["decisions"])))
+
+    # Coverage sits directly under the tree because it is derived from it, and
+    # because "the reasoning" and "what was checked" are the same question
+    # asked twice. A reader deciding how much to trust this wants both at once.
+    cov = coverage_table(case)
+    if case.get("decisions") or case.get("coverage"):
+        body.append(_section("Which workflow rules were followed",
+                             _coverage_block(cov)))
 
     if timeline:
         body.append(_section("Sequence", (
