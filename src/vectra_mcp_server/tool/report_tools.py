@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Annotated, Optional
@@ -11,11 +12,43 @@ from pydantic import Field
 from ..report import CaseError, render, slugify, validate
 from .base import READ_ONLY, BaseMCPTools
 
-#: Where reports land. A fixed subdirectory rather than a random temp name so
+#: Fallback location. A fixed subdirectory rather than a random temp name so
 #: repeat renders of the same entity overwrite instead of accumulating, and so
 #: an operator can find yesterday's report without asking. Same reasoning, and
 #: the same directory convention, as PCAP_DIR.
+#:
+#: The default is the system temp directory, which on macOS is an opaque
+#: per-user path under /var/folders/<hash>/T/ — findable only because the tool
+#: returns it. ``VECTRA_REPORT_DIR`` exists so an operator can point reports at
+#: somewhere they would actually think to look.
 REPORT_DIR = Path(tempfile.gettempdir()) / "vectra-reports"
+
+#: Environment variable overriding :data:`REPORT_DIR`.
+REPORT_DIR_ENV = "VECTRA_REPORT_DIR"
+
+
+def _report_dir() -> tuple[Path, str]:
+    """Resolve the output directory, and say where the choice came from.
+
+    Resolved per call rather than at import, so a value can be set in the
+    server's environment without being baked in at module load, and so tests
+    can vary it.
+
+    A relative value is resolved against the process working directory — which
+    for a stdio server is wherever the MCP client happened to launch it, rarely
+    what anyone means. It is resolved rather than rejected, and the absolute
+    result is what gets reported, so the returned path is never ambiguous.
+
+    Returns:
+        The directory, and a short provenance string for the tool result. The
+        provenance is there for the same reason ``get_active_profile`` reports
+        ``configured_by``: when a file is not where someone expected, the
+        useful answer names the mechanism that decided.
+    """
+    override = os.environ.get(REPORT_DIR_ENV, "").strip()
+    if override:
+        return Path(override).expanduser().resolve(), REPORT_DIR_ENV
+    return REPORT_DIR, "system temp directory"
 
 
 class ReportMCPTools(BaseMCPTools):
@@ -111,10 +144,28 @@ class ReportMCPTools(BaseMCPTools):
         if not name.lower().endswith((".html", ".htm")):
             name += ".html"
 
-        REPORT_DIR.mkdir(parents=True, exist_ok=True)
-        path = REPORT_DIR / name
+        target, source = _report_dir()
         data = page.encode("utf-8")
-        path.write_bytes(data)
+        path = target / name
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except OSError as exc:
+            # Same principle as a bad case file: a value, not a raise. An
+            # operator with a typo in VECTRA_REPORT_DIR should be told which
+            # path failed and how to get back to a working default, not handed
+            # a traceback from inside a tool call.
+            return json.dumps({
+                "rendered": False,
+                "error": f"cannot write the report to {path}: {exc}",
+                "report_dir": str(target),
+                "report_dir_source": source,
+                "hint": (
+                    f"Set {REPORT_DIR_ENV} to an absolute path the server can "
+                    f"create, or unset it to fall back to the system temp "
+                    f"directory ({REPORT_DIR})."
+                ),
+            }, indent=2)
 
         verdict = parsed.get("verdict")
         code = verdict.get("code") if isinstance(verdict, dict) else verdict
@@ -122,6 +173,7 @@ class ReportMCPTools(BaseMCPTools):
         return json.dumps({
             "rendered": True,
             "path": str(path),
+            "report_dir_source": source,
             "size_bytes": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "entity": entity,
@@ -129,7 +181,9 @@ class ReportMCPTools(BaseMCPTools):
             "tenant": parsed.get("tenant", {}).get("label"),
             "warnings": warnings,
             "note": (
-                "Give the operator this path. The file is self-contained — no "
+                "Quote this path to the operator verbatim — it is not "
+                "guessable, and on macOS the default temp directory is an "
+                "opaque per-user path. The file is self-contained — no "
                 "JavaScript, no external references — so it opens offline and "
                 "can be attached to a ticket as-is. If this server runs in a "
                 "container the path is inside it; publish a volume or run the "

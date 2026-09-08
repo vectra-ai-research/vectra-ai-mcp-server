@@ -35,7 +35,15 @@ MINIMAL = {
 
 @pytest.fixture
 def tool(tmp_path, monkeypatch):
-    """The tool, writing into a temp directory instead of the real one."""
+    """The tool, writing into a temp directory instead of the real one.
+
+    ``delenv`` is load-bearing: VECTRA_REPORT_DIR takes precedence over the
+    patched fallback, so without clearing it a developer who has the variable
+    exported would have the whole suite write into their real report folder
+    and the assertions below would pass or fail for reasons unrelated to the
+    code. Same class of bug as a settings test reading an ambient ``.env``.
+    """
+    monkeypatch.delenv("VECTRA_REPORT_DIR", raising=False)
     monkeypatch.setattr("vectra_mcp_server.tool.report_tools.REPORT_DIR", tmp_path)
     return ReportMCPTools(FastMCP(name="test"), client=MagicMock())
 
@@ -147,6 +155,78 @@ async def test_nothing_is_written_when_validation_fails(tool, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+# -------------------------------------------------- where the report lands
+#
+# The default is the system temp directory, which on macOS is an opaque
+# /var/folders/<hash>/T/ path. An operator who ran an investigation and went
+# looking in the repo's reports/ folder found nothing there and reasonably
+# concluded the render had failed. VECTRA_REPORT_DIR is the fix; these pin it.
+
+async def test_env_var_overrides_the_default_directory(tool, tmp_path, monkeypatch):
+    chosen = tmp_path / "somewhere" / "findable"
+    monkeypatch.setenv("VECTRA_REPORT_DIR", str(chosen))
+    out = await call(tool, MINIMAL)
+    assert out["rendered"] is True
+    assert Path(out["path"]).parent == chosen
+    assert Path(out["path"]).exists()
+
+
+async def test_the_override_directory_is_created_if_absent(tool, tmp_path, monkeypatch):
+    """An operator naming a directory should not have to mkdir it first."""
+    chosen = tmp_path / "not" / "yet" / "there"
+    assert not chosen.exists()
+    monkeypatch.setenv("VECTRA_REPORT_DIR", str(chosen))
+    assert (await call(tool, MINIMAL))["rendered"] is True
+    assert chosen.is_dir()
+
+
+async def test_the_result_says_where_the_directory_came_from(tool, tmp_path, monkeypatch):
+    """Provenance, for the same reason get_active_profile reports it: when a
+    file is not where someone expected, name the mechanism that decided."""
+    out = await call(tool, MINIMAL)
+    assert out["report_dir_source"] == "system temp directory"
+
+    monkeypatch.setenv("VECTRA_REPORT_DIR", str(tmp_path / "elsewhere"))
+    out = await call(tool, MINIMAL)
+    assert out["report_dir_source"] == "VECTRA_REPORT_DIR"
+
+
+async def test_a_relative_override_is_resolved_to_an_absolute_path(tool, tmp_path, monkeypatch):
+    """A stdio server's cwd is wherever the client launched it, so a relative
+    value is nearly never what the operator meant. It is resolved rather than
+    rejected, and the *absolute* result is what gets reported."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VECTRA_REPORT_DIR", "relative-reports")
+    out = await call(tool, MINIMAL)
+    written = Path(out["path"])
+    assert written.is_absolute()
+    assert written.parent == (tmp_path / "relative-reports").resolve()
+
+
+async def test_an_empty_override_falls_back_rather_than_writing_to_cwd(tool, tmp_path, monkeypatch):
+    """VECTRA_REPORT_DIR="" is a common way to 'unset' a variable in a config
+    file. Treated as absent, not as the current directory."""
+    monkeypatch.setenv("VECTRA_REPORT_DIR", "   ")
+    out = await call(tool, MINIMAL)
+    assert Path(out["path"]).parent == tmp_path
+    assert out["report_dir_source"] == "system temp directory"
+
+
+async def test_an_unwritable_directory_is_reported_not_raised(tool, tmp_path, monkeypatch):
+    """A typo in the variable must not surface as a traceback mid-investigation.
+
+    The same contract as a bad case file: come back as a value naming the
+    offending path and how to recover.
+    """
+    blocker = tmp_path / "a-file-not-a-directory"
+    blocker.write_text("in the way")
+    monkeypatch.setenv("VECTRA_REPORT_DIR", str(blocker / "reports"))
+    out = await call(tool, MINIMAL)
+    assert out["rendered"] is False
+    assert "cannot write the report" in out["error"]
+    assert "VECTRA_REPORT_DIR" in out["hint"]
+
+
 # ------------------------------------------------------------------ warnings
 
 async def test_warnings_are_returned_alongside_a_successful_render(tool):
@@ -184,6 +264,7 @@ def test_it_is_in_the_registry():
 
 def test_it_makes_no_api_calls(tmp_path, monkeypatch):
     """The client is never touched, so a broken credential cannot stop a render."""
+    monkeypatch.delenv("VECTRA_REPORT_DIR", raising=False)
     monkeypatch.setattr("vectra_mcp_server.tool.report_tools.REPORT_DIR", tmp_path)
     client = MagicMock()
     tool = ReportMCPTools(FastMCP(name="test"), client=client)
