@@ -124,9 +124,45 @@ def test_an_unrecognised_log_format_falls_back_to_text(built, monkeypatch):
 
 
 def test_config_default_matches_the_wiring(monkeypatch):
-    """The declared default and the shipped behaviour must not diverge again."""
+    """The declared default and the shipped behaviour must not diverge again.
+
+    ``_env_file=None`` is load-bearing. ``VectraConfig.model_config`` sets
+    ``env_file=".env"``, and a developer's gitignored ``.env`` in the repo root
+    is read even when the corresponding variable has been removed from
+    ``os.environ`` — ``monkeypatch.delenv`` clears the process environment, not
+    a file on disk. Without this, the test asserts a *declared* default while
+    reading whatever the machine happens to have configured: it passed in CI
+    and in a git worktree with no ``.env``, and failed on a clone whose ``.env``
+    carried ``LOG_FORMAT=json``. A test that depends on an untracked file is
+    worse than no test, because it fails only for the person least able to
+    explain it.
+    """
     monkeypatch.delenv("LOG_FORMAT", raising=False)
     monkeypatch.setenv("VECTRA_BASE_URL", "https://tenant.vectra.ai")
     monkeypatch.setenv("VECTRA_CLIENT_ID", "an-id")
     monkeypatch.setenv("VECTRA_CLIENT_SECRET", "a-secret")
-    assert VectraConfig().log_format == "text"
+    assert VectraConfig(_env_file=None).log_format == "text"
+
+
+def test_no_config_test_reads_a_developers_dotenv(monkeypatch, tmp_path):
+    """Guard the class of bug above, not just the one instance of it.
+
+    Every settings object a test builds must be isolated from an ambient
+    ``.env``. This asserts the isolation mechanism itself works, so a future
+    test that forgets ``_env_file=None`` is a visible failure rather than a
+    machine-dependent one.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("LOG_FORMAT=json\nLOG_LEVEL=DEBUG\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    monkeypatch.setenv("VECTRA_BASE_URL", "https://tenant.vectra.ai")
+    monkeypatch.setenv("VECTRA_CLIENT_ID", "an-id")
+    monkeypatch.setenv("VECTRA_CLIENT_SECRET", "a-secret")
+
+    # Reading the file is the documented behaviour, and is what bit us.
+    assert VectraConfig().log_format == "json"
+    # Opting out is what a test must do.
+    assert VectraConfig(_env_file=None).log_format == "text"
+    assert VectraConfig(_env_file=None).log_level == "INFO"
