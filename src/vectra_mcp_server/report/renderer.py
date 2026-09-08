@@ -330,6 +330,31 @@ def _validate_decisions(case: dict) -> list:
                 f"it belongs in front of the reader rather than in a footnote"
             )
 
+    # Zero coverage is a louder signal than any single missing field, and it
+    # was missing from this list. A real run produced a tree whose nodes named
+    # no rules and whose case file had no coverage block, so all seven rules
+    # rendered "Not reported" -- and nothing warned about it.
+    #
+    # Worth being precise about what this measures: **declaration, not work.**
+    # That same report had populated sweep and ruled-out sections, so the
+    # investigation had plainly done some of what the rules ask; it simply
+    # never said which. An undeclared rule is indistinguishable from a skipped
+    # one, which is exactly why silence has to be called out rather than
+    # rendered as a neutral blank.
+    accounted = [r for r in coverage_table(case) if r["status"]]
+    if not accounted:
+        warnings.append(
+            "no workflow rule is accounted for — every rule renders as 'Not "
+            "reported', so a reader cannot tell a skipped check from one that "
+            "ran and found nothing. Tag decisions with `satisfies`, and use "
+            "`coverage` for rules that produced no decision"
+        )
+    elif len(accounted) < 3:
+        warnings.append(
+            f"only {len(accounted)} of {len(RULES)} workflow rules are accounted "
+            f"for; the rest render as 'Not reported'"
+        )
+
     return warnings
 
 

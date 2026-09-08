@@ -193,6 +193,50 @@ def test_a_case_with_no_decisions_warns_that_it_will_become_required():
     assert any("decisions" in x and "required" in x for x in w)
 
 
+def test_zero_coverage_warns():
+    """The louder signal, and it was missing from the first cut.
+
+    A real run produced a two-node tree whose nodes named no rules and whose
+    case file had no coverage block. All seven rules rendered "Not reported"
+    and nothing warned. The report understated its own investigation, which
+    had populated sweep and ruled-out sections.
+    """
+    w = warnings_for(decisions=[node(satisfies=[])])
+    assert any("no workflow rule is accounted for" in x for x in w)
+
+
+def test_thin_coverage_warns_with_a_count():
+    w = warnings_for(decisions=[node(satisfies=["R1"])])
+    assert any("only 1 of 7" in x for x in w)
+
+
+def test_adequate_coverage_does_not_warn():
+    c = case(decisions=[node(satisfies=["R1", "R2"])],
+             coverage={"R3": "done", "R4": "partial"})
+    assert not any("accounted for" in x or "of 7" in x for x in validate(c))
+
+
+def test_the_codex_shaped_case_now_warns_on_every_count():
+    """Regression for the exact shape a real run produced: two verdict-level
+    nodes, no provenance, nothing load-bearing, no rules named.
+
+    Every one of those is now called out on the page rather than only the
+    load_bearing one.
+    """
+    thin = [
+        {"id": "D1", "question": "Does the evidence support a benign explanation?",
+         "concluded": "No", "would_change_if": "An approved change record covered it"},
+        {"id": "D2", "question": "Should the entity be escalated?",
+         "concluded": "Yes — TP-High", "would_change_if": "Primary evidence is shown to be synthetic"},
+    ]
+    w = validate(case(decisions=thin))
+    assert any("D1 cites no provenance" in x for x in w)
+    assert any("D2 cites no provenance" in x for x in w)
+    assert any("load_bearing" in x for x in w)
+    assert any("no workflow rule is accounted for" in x for x in w)
+    assert len(w) >= 4
+
+
 # ------------------------------------------------------------------ vocabulary
 
 @pytest.mark.parametrize("value", sorted(CONFIDENCE))
@@ -248,6 +292,17 @@ def test_an_explicit_coverage_block_covers_rules_with_no_node():
     assert "inbound" in rows["R2"]["detail"]
 
 
+def _coverage_section(out: str) -> str:
+    """Just the coverage table.
+
+    Counting "Not reported" across the whole document does not work: the
+    warnings quote that label back to the reader on purpose, and warnings are
+    rendered into the page. Scope the count instead of weakening the message.
+    """
+    start = out.index("Which workflow rules were followed")
+    return out[start:out.index("</table>", start)]
+
+
 def test_a_rule_with_neither_renders_as_not_reported():
     """The distinction the table exists for. A skipped check becomes a visible
     row rather than an absence nobody notices — silence is otherwise
@@ -260,7 +315,7 @@ def test_a_rule_with_neither_renders_as_not_reported():
     assert len(unreported) == len(RULES) - 1
 
     out = render(c, validate(c))
-    assert out.count("Not reported") == len(RULES) - 1
+    assert _coverage_section(out).count("Not reported") == len(RULES) - 1
 
 
 def test_every_workflow_rule_appears_in_the_table():
