@@ -6,6 +6,10 @@ import json
 
 from .base import READ_ONLY, BaseMCPTools
 
+#: Cap on list_hosts page size. A `detailed` host carries its full artifact set,
+#: so a large page would swamp an agent's context.
+_MAX_HOST_PAGE = 200
+
 
 class EntityMCPTools(BaseMCPTools):
     """MCP tools for entity (host or account) analysis and management."""
@@ -16,8 +20,64 @@ class EntityMCPTools(BaseMCPTools):
         self._register_tool(self.lookup_entity_info_by_name, READ_ONLY)
         self._register_tool(self.lookup_host_by_ip, READ_ONLY)
         self._register_tool(self.get_host_details, READ_ONLY)
+        self._register_tool(self.list_hosts, READ_ONLY)
         self._register_tool(self.get_account_details, READ_ONLY)
-    
+
+    async def list_hosts(
+        self,
+        size: Annotated[
+            Literal["small", "regular", "detailed"],
+            Field(description="Response verbosity (sent to the API as `size`). 'small' is the lightest. 'regular' is the default. 'detailed' returns the fullest record, including the host_artifact_set used for asset-inventory questions, and is large: pair it with a small page_size. Which fields appear at each size is decided by the API, so check host_artifact_set is present in what comes back before concluding a host has no artifacts.")
+        ] = "regular",
+        name: Annotated[
+            str | None,
+            Field(description="Filter by host name. Partial match.")
+        ] = None,
+        host_ip: Annotated[
+            IPvAnyAddress | None,
+            Field(description="Filter by the host's last seen source IP. Sent to the API as `last_source`.")
+        ] = None,
+        state: Annotated[
+            Literal["active", "inactive"] | None,
+            Field(description="Filter by host state. Leave unset for all states.")
+        ] = None,
+        tags: Annotated[
+            str | None,
+            Field(description="Filter for hosts carrying a particular tag.")
+        ] = None,
+        page_size: Annotated[
+            int,
+            Field(ge=1, le=_MAX_HOST_PAGE, description="Hosts per page.")
+        ] = 50,
+        page: Annotated[int, Field(ge=1, description="1-based page number.")] = 1,
+    ) -> str:
+        """
+        List hosts with a selectable response size, for asset-inventory style questions.
+
+        Uses GET /api/v3.5/hosts/. Unlike get_host_details (one host, by ID) this
+        pages across hosts, and `size` controls how much of each host record is
+        returned, including host_artifact_set (the artifacts Vectra has
+        associated with the host: IPs, MACs, names, and similar).
+
+        Context cost grows quickly with size and page_size. Start with
+        size='small' to find hosts, then re-query one host with 'detailed'.
+
+        Returns:
+            str: JSON page of hosts (count, next, previous, results), or a JSON error object.
+        """
+        try:
+            result = await self.client.get_hosts_v35(
+                size=size, page=page, page_size=page_size, name=name,
+                last_source=str(host_ip) if host_ip is not None else None,
+                state=state, tags=tags,
+            )
+            return json.dumps(result, indent=2, default=str)
+        except Exception as e:
+            return json.dumps(
+                {"error": f"Failed to list hosts: {str(e)}", "size": size},
+                indent=2,
+            )
+
     async def list_entities(
         self,
         entity_type: Annotated[

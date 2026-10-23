@@ -26,6 +26,82 @@ _INVESTIGATION_TIMEOUT = 20
 _BARE_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 
 
+def _column_names(columns) -> list[str] | None:
+    """Pull plain names out of a response `columns` list.
+
+    The API has described columns two ways: bare strings, and
+    ``[name, [{"type": ...}, ""]]`` pairs (what ``meta.columns`` carries today).
+    Duplicate names get a ``_2``, ``_3`` suffix. Keyed rows cannot hold two
+    columns of the same name, and silently overwriting one is the failure this
+    avoids.
+    """
+    if not isinstance(columns, list) or not columns:
+        return None
+    names: list[str] = []
+    seen: dict[str, int] = {}
+    for col in columns:
+        if isinstance(col, str):
+            name = col
+        elif isinstance(col, (list, tuple)) and col and isinstance(col[0], str):
+            name = col[0]
+        elif isinstance(col, dict) and isinstance(col.get("name"), str):
+            name = col["name"]
+        else:
+            return None
+        seen[name] = seen.get(name, 0) + 1
+        names.append(name if seen[name] == 1 else f"{name}_{seen[name]}")
+    return names
+
+
+def normalize_investigation_rows(result: dict) -> dict:
+    """Return investigation results with keyed rows, whatever shape the API sent.
+
+    The Investigate API is moving from one object per row to one array per row,
+    with a `columns` list giving the field order. Every skill, recipe and
+    report written so far reads ``row["field"]``, and a model handed bare
+    positional arrays has to zip them against `columns` by hand across pages.
+    Converting here keeps the tool's output shape stable across the API change.
+
+    Tolerant by design: object rows pass through untouched, so this is safe to
+    ship before the API change lands. Anything it cannot map with confidence
+    (no columns, or a row whose length differs from the column count) is
+    returned as received rather than guessed at.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    results_block = result.get("results")
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    results_dict = results_block if isinstance(results_block, dict) else {}
+
+    columns = meta.get("columns") or results_dict.get("columns") or result.get("columns")
+    if isinstance(result.get("data"), list):
+        container, key = result, "data"
+    elif isinstance(results_dict.get("data"), list):
+        container, key = results_dict, "data"
+    else:
+        return result
+
+    rows = container[key]
+    if not rows or not all(isinstance(r, list) for r in rows):
+        return result
+
+    names = _column_names(columns)
+    if names is None or any(len(r) != len(names) for r in rows):
+        logger.warning(
+            "investigation rows are arrays but could not be mapped to columns; "
+            "returning as received"
+        )
+        return result
+
+    normalized = dict(result)
+    if container is result:
+        normalized[key] = [dict(zip(names, r)) for r in rows]
+    else:
+        normalized["results"] = {**results_dict, key: [dict(zip(names, r)) for r in rows]}
+    return normalized
+
+
 def unquote_identifier_aliases(query: str) -> str:
     """Turn single-quoted aliases into bare identifiers.
 
@@ -734,7 +810,7 @@ class InvestigationMCPTools(BaseMCPTools):
 
             row_count = result.get("meta", {}).get("num_rows_available") or result.get("results", {}).get("row_count", "?")
             logger.info("get_investigation_results: completed request_id=%s rows=%s", request_id, row_count)
-            return json.dumps(result, indent=2)
+            return json.dumps(normalize_investigation_rows(result), indent=2)
 
         except asyncio.TimeoutError:
             logger.error("get_investigation_results: API call timed out after %ds for request_id=%s", _INVESTIGATION_TIMEOUT, request_id)

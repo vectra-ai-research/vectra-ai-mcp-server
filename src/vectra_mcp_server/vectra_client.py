@@ -500,6 +500,45 @@ class VectraClient:
         else:
             return await self._make_request("GET", "hosts", params=params)
     
+    #: Response verbosity of GET /api/v3.5/hosts. `host_artifact_set` (the
+    #: asset-inventory payload) is carried only at the larger sizes, and
+    #: `detailed` on a big page will swamp an agent's context, which is why the
+    #: tool layer defaults to `regular` and caps page size.
+    HOST_SIZES = ("small", "regular", "detailed")
+
+    async def get_hosts_v35(
+        self,
+        size: str = "regular",
+        page: int = 1,
+        page_size: int = 50,
+        name: Optional[str] = None,
+        last_source: Optional[str] = None,
+        state: Optional[str] = None,
+        tags: Optional[str] = None,
+        ordering: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List hosts with a selectable response size. GET /api/v3.5/hosts/
+
+        Separate from get_hosts() on purpose: that call stays on the
+        server-wide default API version and is relied on by lookup_host_by_ip.
+        This one pins v3.5, the only version that accepts `size`.
+        """
+        if size not in self.HOST_SIZES:
+            raise ValueError(f"size must be one of {self.HOST_SIZES}, got {size!r}")
+        params: Dict[str, Any] = {"size": size, "page": page, "page_size": page_size}
+        for key, value in (
+            ("name", name),
+            ("last_source", last_source),
+            ("state", state),
+            ("tags", tags),
+            ("ordering", ordering),
+        ):
+            if value is not None:
+                params[key] = value
+        return await self._make_request(
+            "GET", "hosts/", params=params, api_version="v3.5"
+        )
+
     async def get_host(self, host_id: int) -> Dict[str, Any]:
         """Get specific host by ID."""
         return await self._make_request("GET", f"hosts/{host_id}")
