@@ -678,13 +678,15 @@ class InvestigationMCPTools(BaseMCPTools):
                 "Example: SELECT id.orig_h, count(*) AS failure_count FROM network.kerberos._all WHERE timestamp BETWEEN date_add('day', -7, now()) AND now() GROUP BY id.orig_h ORDER BY failure_count DESC LIMIT 100 "
                 "IMPORTANT: Before calling this tool, you MUST first call "
                 "get_investigation_sql_reference to learn the supported SQL syntax, "
-                "and get_investigation_schema with the relevant data_source to learn "
-                "the exact column names available for your query."
+                "list_investigation_tables to confirm the table exists on this tenant "
+                "and learn its sql_name, and get_table_schema to learn the exact "
+                "column names. If those report discovery is unavailable, use "
+                "get_investigation_schema (a static copy that can lag the API)."
             ))
         ],
     ) -> str:
         """
-        Submit an investigation SQL query and return the request_id. This tool returns immediately — the query runs asynchronously. Use get_investigation_results with the returned request_id to fetch results. Before using this tool, ALWAYS call get_investigation_sql_reference and get_investigation_schema first. The query MUST be a single line (no newlines), MUST use single quotes for string literals only (no double quotes anywhere), MUST write column aliases as bare unquoted identifiers (AS failure_count, ORDER BY failure_count), and MUST NOT contain escaped quotes.
+        Submit an investigation SQL query and return the request_id. This tool returns immediately — the query runs asynchronously. Use get_investigation_results with the returned request_id to fetch results. Before using this tool, ALWAYS call get_investigation_sql_reference, then list_investigation_tables and get_table_schema (or get_investigation_schema if live discovery is unavailable) first. The query MUST be a single line (no newlines), MUST use single quotes for string literals only (no double quotes anywhere), MUST write column aliases as bare unquoted identifiers (AS failure_count, ORDER BY failure_count), and MUST NOT contain escaped quotes.
 
         Returns:
             str: JSON with request_id and searchable_range. Use request_id with get_investigation_results.

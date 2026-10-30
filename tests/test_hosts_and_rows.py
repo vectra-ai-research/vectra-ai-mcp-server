@@ -118,3 +118,29 @@ def test_unmappable_arrays_are_returned_as_received():
 def test_empty_and_non_dict_inputs_are_safe():
     assert normalize_investigation_rows({"data": [], "meta": {}}) == {"data": [], "meta": {}}
     assert normalize_investigation_rows(None) is None
+
+
+def test_real_post_change_payload_normalizes_to_the_old_keys():
+    """A trimmed live response (entra.signins, 30 Oct 2026).
+
+    Rows are arrays under top-level `data`; `meta.columns` keeps its
+    `[name, [{type}, ""]]` pair form. Column names are the flattened leaf names
+    (`vectra.identity_principal` comes back as `identity_principal`), which is
+    what the object-row format used as keys, so existing readers keep working.
+    """
+    import json
+    from pathlib import Path
+
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "investigation_array_rows.json").read_text()
+    )
+    assert all(isinstance(r, list) for r in payload["data"])
+
+    out = normalize_investigation_rows(payload)
+
+    first = out["data"][0]
+    assert first["identity_principal"] == "pm@demolab.vectra.ai"
+    assert first["error_code"] == 50126
+    assert first["is_compliant"] is False
+    assert out["data"][1]["additional_details"] is None
+    assert out["meta"] == payload["meta"]

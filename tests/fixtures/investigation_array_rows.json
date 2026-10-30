@@ -1,0 +1,194 @@
+{
+  "data": [
+    [
+      "2026-10-30T12:06:14+00:00",
+      "pm@demolab.vectra.ai",
+      "Microsoft Azure",
+      "BD",
+      "notApplied",
+      "Error validating credentials due to invalid username or password.",
+      "103.76.45.94",
+      50126,
+      "The user didn't enter the right credentials.",
+      "Mobile Apps and Desktop clients",
+      "Mobile Safari 17.2",
+      "",
+      false,
+      false,
+      "Ios 17.2.0",
+      null
+    ],
+    [
+      "2026-10-30T09:39:16+00:00",
+      "pm@demolab.vectra.ai",
+      "Microsoft Azure CLI",
+      "FR",
+      "failure",
+      "User blocked due to risk on home tenant.",
+      "86.211.125.96",
+      53011,
+      null,
+      "Mobile Apps and Desktop clients",
+      "",
+      "",
+      false,
+      false,
+      "Windows10",
+      null
+    ]
+  ],
+  "request_id": "e1868ac6-5f6a-44a4-b98b-80e32e2b75d7",
+  "meta": {
+    "page": 1,
+    "page_size": 50,
+    "estimated_file_size_bytes": 4576,
+    "num_rows_available": 9,
+    "query_status": "SUCCESS",
+    "columns": [
+      [
+        "timestamp",
+        [
+          {
+            "type": "timestamp"
+          },
+          ""
+        ]
+      ],
+      [
+        "identity_principal",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "app_display_name",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "country_or_region",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "conditional_access_status",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "failure_reason",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "ip_address",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "error_code",
+        [
+          {
+            "type": "number"
+          },
+          ""
+        ]
+      ],
+      [
+        "additional_details",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "client_app_used",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "browser",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "display_name",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "is_compliant",
+        [
+          {
+            "type": "boolean"
+          },
+          ""
+        ]
+      ],
+      [
+        "is_managed",
+        [
+          {
+            "type": "boolean"
+          },
+          ""
+        ]
+      ],
+      [
+        "operating_system",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ],
+      [
+        "trust_type",
+        [
+          {
+            "type": "string"
+          },
+          ""
+        ]
+      ]
+    ]
+  }
+}

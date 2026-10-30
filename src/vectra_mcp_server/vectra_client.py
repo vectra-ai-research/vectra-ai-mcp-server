@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlencode, urlparse, parse_qs
+from urllib.parse import urljoin, urlencode, urlparse, parse_qs, quote
 import base64
 
 import httpx
@@ -1213,6 +1213,55 @@ class VectraClient:
             "GET",
             f"investigations/{request_id}",
             params=params,
+        )
+
+    # Investigate discovery (v3.5)
+    #
+    # What tables exist on this tenant, and what fields each one has. Submit and
+    # poll stay on the default version: the v3.5 contract documents no
+    # POST/GET /investigations/, only these four.
+    #
+    # The live response shapes differ from the contract (verified 2026-10-30):
+    # the schema catalog and each schema arrive under `results`, not `data`, and
+    # a table record has `name`, not `id`. These methods return the body as
+    # received; tolerance lives in the tool layer.
+    async def list_investigation_tables(
+        self,
+        category: Optional[str] = None,
+        source_type: Optional[str] = None,
+        source_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /api/v3.5/investigations/tables/ -- tables available to this tenant."""
+        params = {k: v for k, v in {
+            "category": category,
+            "source_type": source_type,
+            "source_id": source_id,
+        }.items() if v is not None}
+        return await self._make_request(
+            "GET", "investigations/tables/", params=params or None, api_version="v3.5"
+        )
+
+    async def get_investigation_table(self, table: str) -> Dict[str, Any]:
+        """GET /api/v3.5/investigations/tables/{table}/"""
+        return await self._make_request(
+            "GET", f"investigations/tables/{quote(table, safe='')}/", api_version="v3.5"
+        )
+
+    async def list_investigation_schemas(self) -> Dict[str, Any]:
+        """GET /api/v3.5/investigations/schemas/ -- every table with a schema.
+
+        Global, not per tenant: it can name tables this tenant has no data for.
+        """
+        return await self._make_request(
+            "GET", "investigations/schemas/", api_version="v3.5"
+        )
+
+    async def get_investigation_table_schema(self, table_name: str) -> Dict[str, Any]:
+        """GET /api/v3.5/investigations/schemas/{table_name}/ -- every field of one table."""
+        return await self._make_request(
+            "GET",
+            f"investigations/schemas/{quote(table_name, safe='')}/",
+            api_version="v3.5",
         )
 
     # Search functionality
